@@ -7,7 +7,8 @@ u = json.load(open(SRC, encoding="utf-8")); cards = u["shots"] if isinstance(u, 
 assert len(cards) == 28, len(cards)
 ORDER = ["1","2","3","4","5","6","7","8","9","10","11","13","14","15","18a","19","17","18b","20","21","22","23","24","25","26","27","12","16","28"]
 # id -> (perm, state, opens)
-REQ = {"19": (["touch","door"], ["doorClosed"], "doorOpen"), "27": (["touch","hood"], ["hoodClosed"], "hoodOpen"),
+# 19/27 — жест «открыть»: достаточно разрешения открыть дверь/капот (касание подразумевается)
+REQ = {"19": (["door"], ["doorClosed"], "doorOpen"), "27": (["hood"], ["hoodClosed"], "hoodOpen"),
        "16": (["engine"], [], None), "12": ([], ["hoodOpen"], None), "26": (["touch"], ["doorOpen"], None), "28": (["touch"], ["doorOpen"], None),
        "17": ([], ["doorOpen"], None), "18b": ([], ["doorOpen"], None)}
 for n in range(20, 26): REQ[str(n)] = ([], ["doorOpen"], None)
@@ -26,14 +27,15 @@ must = [s["id"] for s in out if s["priority"] == "must"]
 assert len(out) == 29, len(out)
 assert len(first) == 15, first
 assert len(must) in (24,), len(must)   # 23 обязательных + вторая часть 18
+# kind: progressive — круг за кругом с вопросом «Есть доступ?» между кругами; fixed — один набор
 modes = [
-    dict(id="first", name="Первое касание", desc="Ничего не открываем и не трогаем", ids=first, default=True),
-    dict(id="full", name="Полный", desc="Все точки (своя машина или всё разрешено)", ids=ORDER),
-    dict(id="must", name="Обязательное", desc="Только важное", ids=[i for i in ORDER if i in must]),
-    dict(id="c1", name="Круг 1", desc="Внешний обход", ids=[s["id"] for s in out if s["circle"] == 1]),
-    dict(id="c2", name="Круг 2", desc="Детали и надписи", ids=[s["id"] for s in out if s["circle"] == 2]),
-    dict(id="c3", name="Круг 3", desc="Салон и жесты", ids=[s["id"] for s in out if s["circle"] == 3]),
-    dict(id="quick", name="Быстрая эффектная", desc="Яркие кадры за 2–3 минуты", ids=[i for i in ORDER if i in QUICK]),
+    dict(id="first", name="Первое касание", desc="Без доступа. После каждого круга спросим: «Есть доступ?»", ids=ORDER, kind="progressive", start=1, access="none", default=True),
+    dict(id="full", name="Полный", desc="Своя машина: всё можно открывать", ids=ORDER, kind="progressive", start=1, access="all"),
+    dict(id="must", name="Обязательное", desc="Только важное, одним списком", ids=[i for i in ORDER if i in must], kind="fixed"),
+    dict(id="c1", name="Только круг 1", desc="Внешний обход", ids=[s["id"] for s in out if s["circle"] == 1], kind="fixed"),
+    dict(id="c2", name="Только круг 2", desc="Детали и надписи", ids=[s["id"] for s in out if s["circle"] == 2], kind="fixed"),
+    dict(id="c3", name="Только круг 3", desc="Салон и жесты", ids=[s["id"] for s in out if s["circle"] == 3], kind="fixed"),
+    dict(id="quick", name="Быстрая эффектная", desc="Яркие кадры за 2–3 минуты", ids=[i for i in ORDER if i in QUICK], kind="fixed"),
 ]
 for m in modes:
     m["minutes"] = max(1, round(sum(next(s["rhythm"] for s in out if s["id"] == i) + 45 for i in m["ids"]) / 60))
