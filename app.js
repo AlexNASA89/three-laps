@@ -1,7 +1,7 @@
 // Three Laps — интерфейс. Логика в logic.js (чистые функции, тесты logic.test.mjs), хранилище в store.js.
 import * as L from "./logic.js";
 import * as S from "./store.js";
-import { TALK, TALK_FLAT, talkLine, ONBOARD, carIcon, nextIcon } from "./content.js";
+import { TALK, TALK_FLAT, FIELDS, talkLine, ONBOARD, carIcon, nextIcon } from "./content.js";
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -74,7 +74,7 @@ function clearToast() { app.toast = null; clearTimeout(tt); const t = $(".toast"
 
 function needMap() {   // карта круга — один раз, только для кадров текущего круга (жесты-«открывашки» из 3-го круга карту не вызывают)
   const s = app.cur, sh = s && shotOf(s.cursor);
-  if (!sh || s.mapsSeen[sh.circle] || s.modeId === "quick") return false;
+  if (!sh || app.temp || s.mapsSeen[sh.circle] || s.modeId === "quick") return false;
   return !s.circleNow || sh.circle === s.circleNow || !L.isProgressive(app.data, s);
 }
 // куда вести: кадр, временная очередь «подряд» или экран конца очереди
@@ -83,7 +83,8 @@ function toNext(keepScreen) {
   if (app.temp) {
     const rest = app.temp.ids.filter((i) => i !== app.temp.from && ["todo", "skipped"].includes(L.effective(s, shotOf(i))) && !app.temp.seen.includes(i));
     if (rest.length) { app.cur = { ...s, cursor: rest[0] }; app.screen = "frame"; render(); return; }
-    const back = app.temp.back; app.temp = null;
+    const t0 = app.temp, back = t0.back; app.temp = null;
+    if (t0.ret) { app.screen = "talk"; app.talkSec = t0.ret; render(); showToast(`Готово: ${t0.label} снято`, "", null, 2500); return; }
     if (back && ["todo", "skipped"].includes(L.effective(s, shotOf(back)))) { app.cur = { ...s, cursor: back }; app.screen = "frame"; render(); return; }
   }
   if (keepScreen && !["frame", "map"].includes(app.screen) && app.screen !== "summary") { render(); return; }
@@ -123,6 +124,34 @@ function rowShot(s, id) {
 function modeTile(m, on, act) {
   const meta = m.kind === "progressive" ? "3 круга · до 29 точек" : `${m.ids.length} точек · ~${m.minutes} мин`;
   return `<button class="mode ${on ? "on" : ""}" data-a="${act}" data-id="${m.id}"><b>${esc(m.name)}</b> <span class="pill">${meta}</span><span>${esc(m.desc)}</span></button>`;
+}
+
+// ---------- разрешения из разговора: «Да, разрешил» → сразу карточки съёмки → назад к следующему вопросу ----------
+const OPENS = { door: "doorOpen", hood: "hoodOpen" };
+const GRANT = { door: "дверь", hood: "капот", engine: "мотор", touch: "можно трогать" };
+function grantShots(s, key) {   // точки, ради которых просили: жест-«открывашка», потом всё, что ждёт этого доступа
+  return app.data.order.filter((i) => { const sh = shotOf(i);
+    const rel = sh.perm.includes(key) || (OPENS[key] && (sh.state.includes(OPENS[key]) || sh.opens === OPENS[key]));
+    return rel && !["done", "na", "auto"].includes(L.effective(s, sh)); });
+}
+function grantUI(s, l) {
+  const k = l.grant, on = s.perms[k] || (OPENS[k] && s.states[OPENS[k]]), left = on ? grantShots(s, k).filter((i) => shotOf(i).perm.every((p) => s.perms[p]) && !["done", "na", "auto"].includes(L.effective(s, shotOf(i)))).length : 0;
+  const ans = s.qs[l.id] && s.qs[l.id].answer;
+  if (on) return `<div class="row" style="margin-top:8px"><span class="pill okp">Разрешено ✓</span>${left ? `<button class="btn go mini" data-a="grantgo" data-id="${l.id}">Снять сейчас (${left})</button>` : `<span class="small mut">всё снято</span>`}</div>`;
+  return `<div class="row" style="margin-top:8px"><button class="btn go mini" data-a="grant" data-id="${l.id}">Да, разрешил</button>
+    ${OPENS[k] ? `<button class="btn mini" data-a="grantself" data-id="${l.id}">Открыл сам</button>` : ""}<button class="btn mini ${ans === "нет" ? "dark" : ""}" data-a="deny" data-id="${l.id}">Нет</button></div>`;
+}
+const nextLineAnchor = (id) => { const i = TALK_FLAT.findIndex((x) => x.id === id); const n = TALK_FLAT[i + 1]; return n ? "ln-" + n.id : null; };
+async function startGrant(lineId, self) {
+  const l = TALK_FLAT.find((x) => x.id === lineId), k = l.grant;
+  if (self && OPENS[k]) await doAct({ type: "setState", key: OPENS[k], value: true }); else if (!app.cur.perms[k]) await doAct({ type: "setPerm", key: k, value: true });
+  await doAct({ type: "answer", q: lineId, v: { asked: true, answer: self ? "открыл сам" : "да" } });
+  const ids = grantShots(app.cur, k).filter((i) => shotOf(i).perm.every((p) => app.cur.perms[p]));   // без других недостающих разрешений
+  for (const i of ids) if (!L.modeIds(app.data, app.cur).includes(i)) await doAct({ type: "addExtra", id: i });
+  const ready = ids.filter((i) => ["todo", "skipped"].includes(L.effective(app.cur, shotOf(i))));
+  if (!ready.length) { showToast("Отмечено. Снимать по этому разрешению нечего", "", null, 2500); app.talkSec = nextLineAnchor(lineId); render(); return; }
+  app.temp = { ids, seen: [], back: null, from: null, ret: nextLineAnchor(lineId) || "ln-" + lineId, label: GRANT[k] };
+  app.stack.push("talk"); jump(ready[0]);
 }
 
 // ---------- экраны ----------
@@ -181,6 +210,7 @@ const view = {
     const banner = !inSet ? `<div class="lockbar gray">Этот кадр вне текущего набора<button data-a="addextra" data-id="${sh.id}">Добавить</button></div>`
       : e === "locked" ? `<div class="lockbar">Нужно: ${esc(need.join(", "))}</div>`
       : e === "auto" ? `<div class="lockbar gray">Уже открыто — жест снимать не нужно</div>`
+      : app.temp && app.temp.ret ? `<div class="lockbar blue">Разрешили: ${esc(app.temp.label)} · ${Math.min(app.temp.seen.length + 1, app.temp.ids.length)} из ${app.temp.ids.length}<button data-a="tempdone">Готово — к вопросам</button></div>`
       : app.temp ? `<div class="lockbar blue">Подряд: ${app.temp.seen.length + 1} из ${app.temp.ids.length}<button data-a="tempx">Выйти</button></div>` : "";
     const bar = e === "locked" ? `<button class="btn b1 go" data-a="access">Дать доступ</button><button class="btn b2" data-a="gotoq">Следующий ›</button>`
       : e === "done" || e === "auto" || e === "na" ? `<button class="btn pri b1" data-a="gotoq">Дальше ›</button><button class="btn b2" data-a="reset" data-id="${sh.id}">Переснять</button><button class="btn b3" data-a="take" data-id="${sh.id}">Дубль</button>`
@@ -254,20 +284,27 @@ const view = {
   },
   talk() {
     const s = app.cur, nm = app.settings.myName;
-    const chips = TALK.map((sec) => `<button data-a="talkgo" data-id="${sec.id}">${esc(sec.title)}</button>`).join("");
-    const body = TALK.map((sec) => `<div class="ghead" id="sec-${sec.id}">${esc(sec.title)}</div>${sec.tip ? `<div class="small mut">${esc(sec.tip)}</div>` : ""}
+    const qs = TALK_FLAT.filter((l) => l.q), grants = TALK_FLAT.filter((l) => l.grant);
+    const asked = (l) => !!(s && s.qs[l.id] && (s.qs[l.id].asked || s.qs[l.id].answer));
+    const qDone = qs.filter(asked).length, gDone = grants.filter(asked).length;
+    const secCount = (sec) => { const a = sec.lines.filter((l) => l.q || l.grant); return a.length ? ` ${a.filter(asked).length}/${a.length}` : ""; };
+    const chips = TALK.map((sec) => `<button data-a="talkgo" data-id="${sec.id}">${esc(sec.title)}${secCount(sec)}</button>`).join("");
+    const body = TALK.map((sec) => `<div class="ghead" id="sec-${sec.id}">${esc(sec.title)}${secCount(sec) ? `<span class="mut">${secCount(sec)}</span>` : ""}</div>${sec.tip ? `<div class="small mut">${esc(sec.tip)}</div>` : ""}
       ${sec.lines.map((l0) => { const l = talkLine(l0, nm), v = (s && s.qs[l.id]) || {}, k = TALK_FLAT.findIndex((x) => x.id === l.id);
-        return `<div class="ph ${l.q ? "q" : ""}"><div class="en">${esc(l.en)}</div><div class="ru">${esc(l.ru)}</div>
+        const num = l.q ? `Вопрос ${qs.findIndex((x) => x.id === l.id) + 1} из ${qs.length}` : l.grant ? `Разрешение ${grants.findIndex((x) => x.id === l.id) + 1} из ${grants.length}` : `Фраза ${k + 1} из ${TALK_FLAT.length}`;
+        const g = l.grant && s ? grantUI(s, l) : "";
+        return `<div class="ph ${l.q ? "q" : ""} ${l.grant ? "grant" : ""} ${asked(l0) ? "asked" : ""}" id="ln-${l.id}"><div class="num">${num}${asked(l0) ? " · ✓" : ""}</div><div class="en">${esc(l.en)}</div><div class="ru">${esc(l.ru)}</div>${g}
           <div class="row" style="margin-top:8px"><button class="btn" style="min-height:48px;margin:0" data-a="owner" data-id="${k}">Показать хозяину</button>
           ${l.q && s ? `<label class="chk"><input type="checkbox" data-q="${l.id}" data-f="asked" ${v.asked ? "checked" : ""}> спросил</label>` : ""}</div>
-          ${l.q && s ? `<textarea data-q="${l.id}" data-f="answer" rows="2" placeholder="Ответ (можно голосом с клавиатуры)">${esc(v.answer || "")}</textarea>` : ""}</div>`; }).join("")}`).join("");
-    return `<div class="top"><div class="p">Разговор с хозяином<small>читайте с экрана или покажите крупно</small></div><button class="chip" data-a="back">Готово</button></div>
+          ${FIELDS[l.id] && s ? `${v.answer ? `<div class="ans">${esc(v.answer)}</div>` : ""}<button class="btn ${v.answer ? "" : "go"}" style="margin:8px 0 0" data-a="ansform" data-id="${l.id}">${v.answer ? "Изменить ответ" : l.id === "v3" ? "Записать контакт" : "Записать ответ"}</button>`
+            : l.q && s ? `<textarea data-q="${l.id}" data-f="answer" rows="2" placeholder="Ответ (можно голосом с клавиатуры)">${esc(v.answer || "")}</textarea>` : ""}</div>`; }).join("")}`).join("");
+    return `<div class="top"><div class="p">Разговор с хозяином<small>${s ? `вопросы ${qDone} из ${qs.length} · разрешения ${gDone} из ${grants.length}` : "читайте с экрана или покажите крупно"}</small></div><button class="chip" data-a="back">Готово</button></div>
       <div class="fil pad">${chips}</div><div class="scr" id="talkscr">${nm ? "" : `<div class="card small">Совет: впишите своё имя в Настройках — оно появится во фразе знакомства.</div>`}${body}
       <button class="btn" data-a="back">Назад</button></div>`;
   },
   bugs() {
     return `<div class="scr"><h2>Ошибки и заметки</h2><div class="small mut">То, что вы заметили при проверке. Потом «Подготовить логи», скопировать и прислать.</div>
-      ${app.bugs.length ? app.bugs.slice().reverse().map((b) => `<div class="phot"><div class="small mut">${new Date(b.ts).toLocaleString("ru")} · ${esc(b.screen)}${b.shot ? " · №" + esc(b.shot) : ""}${b.car ? " · " + esc(b.car) : ""}</div><div>${esc(b.text)}</div><button class="btn ghost" style="min-height:44px;margin:8px 0 0" data-a="bugdel" data-id="${b.id}">Удалить</button></div>`).join("") : `<div class="card mut">Пока пусто.</div>`}
+      ${app.bugs.length ? app.bugs.slice().reverse().map((b) => `<div class="ph"><div class="small mut">${new Date(b.ts).toLocaleString("ru")} · ${esc(b.screen)}${b.shot ? " · №" + esc(b.shot) : ""}${b.car ? " · " + esc(b.car) : ""}</div><div>${esc(b.text)}</div><button class="btn ghost" style="min-height:44px;margin:8px 0 0" data-a="bugdel" data-id="${b.id}">Удалить</button></div>`).join("") : `<div class="card mut">Пока пусто.</div>`}
       <button class="btn" data-a="bug">Добавить заметку</button><button class="btn go" data-a="logs">Подготовить логи</button><button class="btn ghost" data-a="back">Назад</button></div>`;
   },
   settings() {
@@ -289,6 +326,17 @@ function sheets() {
       <button class="btn" data-a="note">Заметка${s.shots[sh.id].note ? ": " + esc(s.shots[sh.id].note) : ""}</button><button class="btn" data-a="access">Доступ и «хозяин уже открыл»</button>
       <button class="btn" data-a="talk" data-id="hello">Разговор с хозяином</button><button class="btn" data-a="undo">Отменить последнее</button><button class="btn" data-a="bug">Заметил ошибку</button>
       <button class="btn ghost" data-a="finishall">Завершить съёмку</button><button class="btn ghost" data-a="closesheet">Закрыть</button>`); }
+  if (app.sheet && app.sheet.t === "ans") { const id = app.sheet.id, l = TALK_FLAT.find((x) => x.id === id), fs = FIELDS[id], v = app.sheet.draft;
+    const lab = (f) => f.en ? `${f.en} · <i>${f.ru}</i>` : esc(f.ru);
+    const field = (f) => f.type === "choice"
+      ? `<div class="fl"><span>${lab(f)}</span><div class="opts">${f.opts.map((o) => `<button class="${v[f.k] === o ? "on" : ""}" data-a="ansopt" data-id="${f.k}" data-v="${esc(o)}">${esc(o)}</button>`).join("")}</div></div>`
+      : f.type === "area" ? `<label class="fl"><span>${lab(f)}</span><textarea data-fk="${f.k}" rows="2" placeholder="${esc(f.ph || "")}">${esc(v[f.k] || "")}</textarea></label>`
+      : `<label class="fl"><span>${lab(f)}</span><input data-fk="${f.k}" type="${f.type === "tel" ? "tel" : f.type === "email" ? "email" : "text"}" ${["num", "money"].includes(f.type) ? 'inputmode="numeric"' : ""} value="${esc(v[f.k] || "")}" placeholder="${esc(f.ph || "")}" autocomplete="off"></label>`;
+    const qn = TALK_FLAT.filter((x) => x.q), qi = qn.findIndex((x) => x.id === id) + 1;
+    return sheet(`<div class="num">Вопрос ${qi} из ${qn.length} · ${id === "v3" ? "Contact · Контакт" : "ответ"}</div><h2 style="font-size:19px">${esc(l.ru)}</h2>
+      ${id === "v3" ? `<div class="small mut">Можно дать телефон хозяину — подписи по-английски. Хранится только в этом телефоне.</div>` : ""}
+      ${fs.map(field).join("")}<label class="fl"><span>Ещё заметка</span><textarea data-fk="_note" rows="2">${esc(v._note || "")}</textarea></label>
+      <button class="btn go" data-a="anssave" data-id="${id}">Сохранить</button><button class="btn ghost" data-a="closesheet">Отмена</button>`); }
   if (app.sheet === "bug") return sheet(`<h2>Заметил ошибку</h2><div class="small mut">Что не так? Сохранится вместе с экраном и кадром.</div><textarea id="bugtxt" rows="5" placeholder="Например: кнопка «Снял» не нажимается на кадре 7"></textarea><button class="btn go" data-a="bugsave">Сохранить</button><button class="btn ghost" data-a="closesheet">Отмена</button>`);
   if (app.sheet && app.sheet.t === "logs") return sheet(`<h2>Логи</h2><div class="small mut">Скопируйте и пришлите мне.</div><textarea id="logtxt" rows="12" readonly style="font-size:12px">${esc(app.sheet.text)}</textarea><button class="btn go" data-a="logcopy">Скопировать</button><button class="btn" data-a="logfile">Сохранить файл</button><button class="btn ghost" data-a="closesheet">Закрыть</button>`);
   if (app.sheet === "access") return sheet(`<h2>Доступ</h2><div class="small mut">Что разрешил хозяин. Можно менять в любой момент, снятое не пропадёт.</div>${PERMS.map(([k, t]) => tog(k, t, s.perms[k], "perm")).join("")}
@@ -314,7 +362,7 @@ function render() {
   root.dataset.scr = app.screen;
   root.innerHTML = v() + sheets()
     + (app.toast ? `<div class="toast ${["frame", "map", "pre"].includes(app.screen) ? "" : "top"}"><span>${esc(app.toast.msg)}</span>${app.toast.label ? `<button data-a="toast">${esc(app.toast.label)}</button>` : ""}</div>` : "")
-    + (app.owner !== null ? (() => { const l = talkLine(TALK_FLAT[app.owner], app.settings.myName); return `<div class="owner"><div class="en">${esc(l.en)}</div><div class="ru">${esc(l.ru)}</div>
+    + (app.owner !== null ? (() => { const l = talkLine(TALK_FLAT[app.owner], app.settings.myName); return `<div class="owner"><div class="onum">${TALK_FLAT[app.owner].q ? `Вопрос ${TALK_FLAT.filter((x) => x.q).indexOf(TALK_FLAT[app.owner]) + 1} из ${TALK_FLAT.filter((x) => x.q).length}` : `Фраза ${app.owner + 1} из ${TALK_FLAT.length}`}</div><div class="en">${esc(l.en)}</div><div class="ru">${esc(l.ru)}</div>
       <div class="ownerbar"><button data-a="ownerp" ${app.owner ? "" : "disabled"}>‹</button><button data-a="ownerx">Закрыть</button><button data-a="ownern" ${app.owner < TALK_FLAT.length - 1 ? "" : "disabled"}>›</button></div></div>`; })() : "");
   if (same) { const n = $(".scr"); if (n) n.scrollTop = keep; }
   if (app.screen === "frame") { wake(); const cw = $("#cw"); if (cw) swipe(cw); } else unwake();
@@ -322,7 +370,7 @@ function render() {
   const ph = $("#ph"); if (ph) ph.onchange = () => photo(ph.files[0]);
   root.querySelectorAll("[data-q]").forEach((el) => (el.onchange = () => { const v2 = el.dataset.f === "asked" ? { asked: el.checked } : { answer: el.value, asked: true }; doAct({ type: "answer", q: el.dataset.q, v: v2 }); }));
   const mn = $("#myname"); if (mn) mn.onchange = () => { app.settings.myName = mn.value.trim(); S.setKV("settings", app.settings); };
-  if (app.screen === "talk" && app.talkSec) { const el = document.getElementById("sec-" + app.talkSec); app.talkSec = null; if (el) el.scrollIntoView({ block: "start" }); }
+  if (app.screen === "talk" && app.talkSec) { const el = document.getElementById(app.talkSec.startsWith("ln-") ? app.talkSec : "sec-" + app.talkSec); app.talkSec = null; if (el) el.scrollIntoView({ block: "start" }); }
 }
 
 // ---------- события ----------
@@ -377,6 +425,18 @@ async function handle(a, id, t) {
     case "gotoq": { app.temp = null; const q = L.nextAfter(app.data, { ...s }, s.cursor) || L.queue(app.data, s)[0];
       if (q) jump(q); else { app.cur = { ...s, cursor: null }; toNext(); } break; }
     case "tempx": app.temp = null; render(); break;
+    case "tempdone": { const t0 = app.temp; app.temp = null; if (t0 && t0.ret) { app.screen = "talk"; app.talkSec = t0.ret; } render(); break; }
+    case "grant": await startGrant(id, false); break;
+    case "grantself": await startGrant(id, true); break;
+    case "grantgo": await startGrant(id, false); break;
+    case "contact": case "ansform": { const q = (s && s.qs[id]) || {}; app.sheet = { t: "ans", id, draft: { ...(q.fields || q.contact || {}) } }; render(); break; }
+    case "ansopt": { syncAns(); const d = app.sheet.draft; d[id] = d[id] === t.dataset.v ? "" : t.dataset.v; render(); break; }
+    case "anssave": { syncAns(); const fs = FIELDS[id], d = app.sheet.draft;
+      const money = (x) => (x && /^\d[\d\s.,]*$/.test(x) ? "$" + x.replace(/[^\d]/g, "").replace(/\B(?=(\d{3})+(?!\d))/g, " ") : x);
+      const lines = [...fs.map((f) => [(f.ru[0].toUpperCase() + f.ru.slice(1)).replace(/,? ?\$$/, ""), f.type === "money" ? money(d[f.k]) : d[f.k]]), ["Заметка", d._note]].filter(([, x]) => x).map(([a2, x]) => `${a2}: ${x}`);
+      app.sheet = null; await doAct({ type: "answer", q: id, v: { asked: true, fields: d, answer: lines.join("\n") } });
+      showToast(lines.length ? "Ответ сохранён" : "Пусто — ничего не записано", "", null, 2000); break; }
+    case "deny": await doAct({ type: "answer", q: id, v: { asked: true, answer: "нет" } }); app.talkSec = nextLineAnchor(id); render(); break;
     case "list": app.select = null; go("list"); break;
     case "filter": app.filter = id; render(); break;
     case "tile": if (app.select) { const i = app.select.indexOf(id); if (i >= 0) app.select.splice(i, 1); else app.select.push(id); render(); } else jump(id); break;
@@ -435,6 +495,10 @@ async function handle(a, id, t) {
 function fullSummary(s) {   // итог + ответы хозяина (вопрос по-русски)
   const qa = TALK_FLAT.filter((l) => l.q && s.qs[l.id] && (s.qs[l.id].asked || s.qs[l.id].answer));
   return L.summaryText(app.data, { ...s, qs: {} }) + (qa.length ? "\n\nРазговор с хозяином:\n" + qa.map((l) => `• ${l.ru}\n  ${s.qs[l.id].answer || "(спросил, ответ не записан)"}`).join("\n") : "");
+}
+function syncAns() {   // перенести введённое в черновик перед перерисовкой листа
+  if (!app.sheet || app.sheet.t !== "ans") return;
+  root.querySelectorAll("[data-fk]").forEach((el) => { app.sheet.draft[el.dataset.fk] = el.value.trim(); });
 }
 function toggle(g, k) {
   if (g === "dperm") { app.newDraft.perms[k] = !app.newDraft.perms[k]; render(); }

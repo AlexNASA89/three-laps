@@ -88,3 +88,14 @@ input[type=text]{font-size:17px}
 .row .btn{font-size:17px}.bar .btn{font-size:18px}
 @media (min-width:480px){.grid{grid-template-columns:repeat(5,1fr)}}
 .ownerbar button[data-a=ownerp],.ownerbar button[data-a=ownern]{font-size:32px;line-height:1}
+.ph.grant{border-left:4px solid var(--green)}.pill.okp{background:var(--green);color:#fff;font-size:15px;padding:8px 12px}
+.ph .row .btn.mini{flex:1;min-height:52px}
+.ph .num{font-size:13px;font-weight:800;color:var(--mut);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px}
+.ph.asked{opacity:.75}.ph.asked .num{color:var(--green)}
+.owner .onum{position:absolute;top:calc(16px + env(safe-area-inset-top));left:0;right:0;font-weight:800;color:#777;font-size:16px}
+.fl{display:block;margin:10px 0}.fl span{display:block;font-weight:700;font-size:15px;margin-bottom:4px}.fl i{font-style:normal;color:var(--mut);font-weight:600}
+.fl input,.fl textarea{width:100%}
+input[type=tel],input[type=email]{width:100%;font:inherit;font-size:17px;padding:12px;border-radius:12px;border:2px solid var(--line);background:var(--surf);color:var(--ink);min-height:52px}
+.ans{white-space:pre-line;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:8px;font-size:15px}
+.opts{display:flex;flex-wrap:wrap;gap:8px}.opts button{min-height:48px;padding:0 16px;border-radius:24px;background:var(--btn2);font-weight:700;font-size:16px}.opts button.on{background:var(--blue);color:#fff}
+.sheet .num{font-size:13px;font-weight:800;color:var(--mut);text-transform:uppercase}
