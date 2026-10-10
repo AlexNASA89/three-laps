@@ -11,8 +11,10 @@ for sz in (192, 512):
         d.ellipse([sz / 2 - rr, sz / 2 - rr, sz / 2 + rr, sz / 2 + rr], outline=(245, 190, 30) if k == 0 else (255, 255, 255) if k == 1 else (62, 214, 116), width=w)
     im.save(os.path.join(ROOT, "icons", f"icon-{sz}.png"))
 files = []
-for base, _, names in os.walk(ROOT):
+for base, dirs, names in os.walk(ROOT):
+    dirs[:] = [d for d in dirs if not d.startswith(".")]
     for n in names:
+        if n.startswith("."): continue
         p = os.path.join(base, n); rel = os.path.relpath(p, ROOT).replace("\\", "/")
         if rel.startswith("tools/") or rel.startswith("_") or rel in ("precache.json", "package.json", "logic.test.mjs", "sw.js") or rel.endswith((".py", ".md")): continue
         files.append(rel)

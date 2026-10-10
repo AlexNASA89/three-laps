@@ -1,4 +1,4 @@
-// build: 89efeec796
+// build: 19d9944921
 // Service worker: всё в кэш при установке, дальше cache-first (офлайн). Версия и список файлов — precache.json (tools/build_sw.py).
 const CACHE_PREFIX = "threelaps-";
 let CACHE = null;
