@@ -1,5 +1,5 @@
-// build: d0054c9c1f
-// Service worker: всё в кэш при установке, дальше cache-first (офлайн). Версия и список файлов — precache.json (tools/build_sw.py).
+// build: c736455856
+// Service worker v0.5: всё в кэш при установке, дальше cache-first (офлайн). Версия и список файлов — precache.json (tools/build_sw.py).
 const CACHE_PREFIX = "threelaps-";
 let CACHE = null;
 async function manifest() { const r = await fetch("precache.json", { cache: "no-store" }); return r.json(); }
@@ -8,7 +8,8 @@ self.addEventListener("install", (e) => {
     const m = await manifest(); CACHE = CACHE_PREFIX + m.version;
     const c = await caches.open(CACHE); let n = 0;
     const post = async () => { for (const cl of await self.clients.matchAll({ includeUncontrolled: true })) cl.postMessage({ type: "precache", n, total: m.files.length, version: m.version }); };
-    for (let i = 0; i < m.files.length; i += 8) { await Promise.all(m.files.slice(i, i + 8).map((f) => c.add(new Request(f, { cache: "reload" })).then(() => n++))); await post(); }
+    // один недоступный файл не должен ломать установку (карточки могут докладываться позже)
+    for (let i = 0; i < m.files.length; i += 8) { await Promise.all(m.files.slice(i, i + 8).map((f) => c.add(new Request(f, { cache: "reload" })).then(() => n++, () => {}))); await post(); }
     await post();
   })());
 });

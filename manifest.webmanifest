@@ -1,7 +1,7 @@
 {
   "name": "Three Laps",
   "short_name": "Three Laps",
-  "description": "Три круга вокруг машины: чек-лист съёмки",
+  "description": "Маршрут съёмки вокруг машины: карта, карточки, фразы",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

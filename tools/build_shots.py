@@ -1,44 +1,50 @@
-"""universal.json + таблица доступа (ТЗ v3 §4) -> three_laps/shots.json. Проверяет числа и останавливается при ошибке.
-python three_laps/tools/build_shots.py"""
-import json, os, sys
+"""Маршрут обхода (ТЗ v4.1, §2) -> three_laps/shots.json. Проверяет порядок и останавливается при ошибке.
+python three_laps/tools/build_shots.py
+
+Карточки: cards/{light,dark}/<card>.webp и thumb/<card>.webp (генерирует shot_guide, сюда не пишем)."""
+import json, os
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, "..", "shot_guide", "universal.json")
-u = json.load(open(SRC, encoding="utf-8")); cards = u["shots"] if isinstance(u, dict) else u
-assert len(cards) == 28, len(cards)
-ORDER = ["1","2","3","4","5","6","7","8","9","10","11","13","14","15","18a","19","17","18b","20","21","22","23","24","25","26","27","12","16","28"]
-# id -> (perm, state, opens)
-# 19/27 — жест «открыть»: достаточно разрешения открыть дверь/капот (касание подразумевается)
-REQ = {"19": (["door"], ["doorClosed"], "doorOpen"), "27": (["hood"], ["hoodClosed"], "hoodOpen"),
-       "16": (["engine"], [], None), "12": ([], ["hoodOpen"], None), "26": (["touch"], ["doorOpen"], None), "28": (["touch"], ["doorOpen"], None),
-       "17": ([], ["doorOpen"], None), "18b": ([], ["doorOpen"], None)}
-for n in range(20, 26): REQ[str(n)] = ([], ["doorOpen"], None)
-QUICK = ["1", "3", "6", "14", "19", "27"]
-out = []
-for sid in ORDER:
-    n = int("".join(ch for ch in sid if ch.isdigit())); c = cards[n - 1]
-    perm, state, opens = REQ.get(sid, ([], [], None))
-    rhythm = sum(x[1] for x in c.get("timeline", []) if isinstance(x[1], (int, float)))
-    part = " · часть 1 из 2: VIN через лобовое" if sid == "18a" else " · часть 2 из 2: таблички на двери" if sid == "18b" else ""
-    out.append(dict(id=sid, card="%02d" % n, title=c["title"].capitalize() if c["title"].isupper() else c["title"], part=part, circle=c["circle"],
-                    section=c["section"], priority=c.get("priority", "optional"), rhythm=rhythm, perm=perm, state=state, opens=opens,
-                    order=ORDER.index(sid) + 1))
-first = [s["id"] for s in out if not s["perm"] and not s["state"]]
-must = [s["id"] for s in out if s["priority"] == "must"]
-assert len(out) == 29, len(out)
-assert len(first) == 15, first
-assert len(must) in (24,), len(must)   # 23 обязательных + вторая часть 18
-# kind: progressive — круг за кругом с вопросом «Есть доступ?» между кругами; fixed — один набор
-modes = [
-    dict(id="first", name="Первое касание", desc="Без доступа. После каждого круга спросим: «Есть доступ?»", ids=ORDER, kind="progressive", start=1, access="none", default=True),
-    dict(id="full", name="Полный", desc="Своя машина: всё можно открывать", ids=ORDER, kind="progressive", start=1, access="all"),
-    dict(id="must", name="Обязательное", desc="Только важное, одним списком", ids=[i for i in ORDER if i in must], kind="fixed"),
-    dict(id="c1", name="Только круг 1", desc="Внешний обход", ids=[s["id"] for s in out if s["circle"] == 1], kind="fixed"),
-    dict(id="c2", name="Только круг 2", desc="Детали и надписи", ids=[s["id"] for s in out if s["circle"] == 2], kind="fixed"),
-    dict(id="c3", name="Только круг 3", desc="Салон и жесты", ids=[s["id"] for s in out if s["circle"] == 3], kind="fixed"),
-    dict(id="quick", name="Быстрая эффектная", desc="Яркие кадры за 2–3 минуты", ids=[i for i in ORDER if i in QUICK], kind="fixed"),
+
+# точка: (общий план, ближе «+»)
+OUT = [
+    ("Подход низко к передку ¾", "Фары — дуга с 1 м"),
+    ("Строго спереди", "Эмблема на решётке"),
+    ("Дуга вокруг передка", "Шильдик на крыле"),
+    ("Краб вдоль борта", "Колесо — стоп и наклон"),
+    ("Строгий профиль справа", "Зеркало и ручка двери"),
+    ("Дуга вокруг кормы", "Фонари и выхлоп"),
+    ("Строго сзади", "Звук мотора у выхлопа (если заведут)"),
+    ("Краб вдоль левого борта", "Салон через открытое окно (если открыто)"),
+    ("Сверху на передок", "Мотор — облёт сверху (если капот открыт)"),
 ]
-for m in modes:
-    m["minutes"] = max(1, round(sum(next(s["rhythm"] for s in out if s["id"] == i) + 45 for i in m["ids"]) / 60))
-json.dump(dict(shots=out, modes=modes, order=ORDER, maps={"1": "00z_karta_krug1", "2": "09z_karta_krug2", "3": "18z_karta_krug3"}, pre="00a_pered_semkoy"),
-          open(os.path.join(ROOT, "shots.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-print("OK shots", len(out), "first", len(first), "must", len(must), [(m["id"], len(m["ids"]), m["minutes"]) for m in modes])
+SALON = [
+    ("19", "Открыть дверь рукой"), ("17", "Салон из двери водителя"), ("20", "Приборы крупно"), ("21", "Руль и эмблема"),
+    ("22", "Рычаг КПП и схема"), ("23", "Сиденья и обивка"), ("24", "Дверная карта"), ("25", "Радио, консоль, педали"),
+    ("26", "Рука на руле, ключ"), ("27", "Поднять капот"), ("28", "Фары включаются"),
+]
+
+out = []
+for n, (base, near) in enumerate(OUT, 1):
+    out.append(dict(id=str(n), tag=str(n), point=n, plus=False, card="%02d" % n, map="map_out1", label=base))
+    out.append(dict(id="%dp" % n, tag="%d+" % n, point=n, plus=True, card="%02dp" % n, map="map_out2", label=near))
+out.append(dict(id="vin", tag="VIN", point=None, plus=False, card="vin", map="map_out2", label="VIN · финал",
+                note="Отдельный короткий кадр в самом конце: вплотную к стеклу, под углом, блик ладонью, 3 с неподвижно"))
+salon = [dict(id=c, tag=c, point=None, plus=False, card=c, map="map_salon", label=t) for c, t in SALON]
+
+assert [p["card"] for p in out] == [x for n in range(1, 10) for x in ("%02d" % n, "%02dp" % n)] + ["vin"]
+assert len(out) == 19 and len(salon) == 11
+for r, maps in ((out, ("map_out1", "map_out2")), (salon, ("map_salon",))):
+    assert {p["map"] for p in r} == set(maps)
+    assert len({p["id"] for p in r}) == len(r) and all(p["label"] for p in r)
+
+data = dict(
+    pre=dict(id="pre", tag="Перед съёмкой", card="pre", label="Перед съёмкой",
+             note="Протри камеру · заряд и место · 4K и сетка · «Не беспокоить» · солнце за спиной"),
+    # карты: «Снаружи» — две (круг 1: точки 1–9; круг 2: 1+…9+ и VIN), «Салон» — одна
+    routes=[dict(id="out", title="Снаружи", maps=[dict(card="map_out1", title="Круг 1 · общий план", short="Круг 1"),
+                                                  dict(card="map_out2", title="Круг 2 · ближе", short="Круг 2")], points=out),
+            dict(id="salon", title="Салон", maps=[dict(card="map_salon", title="Салон", short="Салон")],
+                 note="Если окно или дверь открыты", points=salon)],
+)
+json.dump(data, open(os.path.join(ROOT, "shots.json"), "w", encoding="utf-8", newline="\n"), ensure_ascii=False, indent=1)
+print("OK shots.json: out", len(out), "salon", len(salon))

@@ -1,670 +1,314 @@
 {
- "shots": [
-  {
-   "id": "1",
-   "card": "01",
-   "title": "Подход низко к передку ¾",
-   "part": "",
-   "circle": 1,
-   "section": "Экстерьер",
-   "priority": "must",
-   "rhythm": 4,
-   "perm": [],
-   "state": [],
-   "opens": null,
-   "order": 1
-  },
-  {
-   "id": "2",
-   "card": "02",
-   "title": "Строго спереди",
-   "part": "",
-   "circle": 1,
-   "section": "Экстерьер",
-   "priority": "must",
-   "rhythm": 9,
-   "perm": [],
-   "state": [],
-   "opens": null,
-   "order": 2
-  },
-  {
-   "id": "3",
-   "card": "03",
-   "title": "Дуга вокруг передка",
-   "part": "",
-   "circle": 1,
-   "section": "Экстерьер",
-   "priority": "must",
-   "rhythm": 4,
-   "perm": [],
-   "state": [],
-   "opens": null,
-   "order": 3
-  },
-  {
-   "id": "4",
-   "card": "04",
-   "title": "Краб вдоль борта",
-   "part": "",
-   "circle": 1,
-   "section": "Экстерьер",
-   "priority": "must",
-   "rhythm": 4,
-   "perm": [],
-   "state": [],
-   "opens": null,
-   "order": 4
-  },
-  {
-   "id": "5",
-   "card": "05",
-   "title": "Строгий профиль справа",
-   "part": "",
-   "circle": 1,
-   "section": "Экстерьер",
-   "priority": "must",
-   "rhythm": 0,
-   "perm": [],
-   "state": [],
-   "opens": null,
-   "order": 5
-  },
-  {
-   "id": "6",
-   "card": "06",
-   "title": "Дуга вокруг кормы",
-   "part": "",
-   "circle": 1,
-   "section": "Экстерьер",
-   "priority": "must",
-   "rhythm": 4,
-   "perm": [],
-   "state": [],
-   "opens": null,
-   "order": 6
-  },
-  {
-   "id": "7",
-   "card": "07",
-   "title": "Строго сзади",
-   "part": "",
-   "circle": 1,
-   "section": "Экстерьер",
-   "priority": "must",
-   "rhythm": 9,
-   "perm": [],
-   "state": [],
-   "opens": null,
-   "order": 7
-  },
-  {
-   "id": "8",
-   "card": "08",
-   "title": "Краб вдоль левого борта",
-   "part": "",
-   "circle": 1,
-   "section": "Экстерьер",
-   "priority": "must",
-   "rhythm": 4,
-   "perm": [],
-   "state": [],
-   "opens": null,
-   "order": 8
-  },
-  {
-   "id": "9",
-   "card": "09",
-   "title": "Сверху на передок",
-   "part": "",
-   "circle": 1,
-   "section": "Экстерьер",
-   "priority": "must",
-   "rhythm": 5,
-   "perm": [],
-   "state": [],
-   "opens": null,
-   "order": 9
-  },
-  {
-   "id": "10",
-   "card": "10",
-   "title": "Фары — дуга с 1 м",
-   "part": "",
-   "circle": 2,
-   "section": "Детали и надписи",
-   "priority": "must",
-   "rhythm": 4,
-   "perm": [],
-   "state": [],
-   "opens": null,
-   "order": 10
-  },
-  {
-   "id": "11",
-   "card": "11",
-   "title": "Эмблема на решётке",
-   "part": "",
-   "circle": 2,
-   "section": "Детали и надписи",
-   "priority": "must",
-   "rhythm": 7,
-   "perm": [],
-   "state": [],
-   "opens": null,
-   "order": 11
-  },
-  {
-   "id": "13",
-   "card": "13",
-   "title": "Шильдик на крыле",
-   "part": "",
-   "circle": 2,
-   "section": "Детали и надписи",
-   "priority": "must",
-   "rhythm": 7,
-   "perm": [],
-   "state": [],
-   "opens": null,
-   "order": 12
-  },
-  {
-   "id": "14",
-   "card": "14",
-   "title": "Колесо — стоп и наклон",
-   "part": "",
-   "circle": 2,
-   "section": "Колёса",
-   "priority": "must",
-   "rhythm": 5,
-   "perm": [],
-   "state": [],
-   "opens": null,
-   "order": 13
-  },
-  {
-   "id": "15",
-   "card": "15",
-   "title": "Фонари и выхлоп",
-   "part": "",
-   "circle": 2,
-   "section": "Детали и надписи",
-   "priority": "must",
-   "rhythm": 5,
-   "perm": [],
-   "state": [],
-   "opens": null,
-   "order": 14
-  },
-  {
-   "id": "18a",
-   "card": "18",
-   "title": "Vin и таблички",
-   "part": " · часть 1 из 2: VIN через лобовое",
-   "circle": 2,
-   "section": "Таблички/VIN",
-   "priority": "must",
-   "rhythm": 8,
-   "perm": [],
-   "state": [],
-   "opens": null,
-   "order": 15
-  },
-  {
-   "id": "19",
-   "card": "19",
-   "title": "Открыть дверь рукой",
-   "part": "",
-   "circle": 3,
-   "section": "Жесты",
-   "priority": "must",
-   "rhythm": 4,
-   "perm": [
-    "door"
-   ],
-   "state": [
-    "doorClosed"
-   ],
-   "opens": "doorOpen",
-   "order": 16
-  },
-  {
-   "id": "17",
-   "card": "17",
-   "title": "Салон из двери водителя",
-   "part": "",
-   "circle": 2,
-   "section": "Салон",
-   "priority": "must",
-   "rhythm": 6,
-   "perm": [],
-   "state": [
-    "doorOpen"
-   ],
-   "opens": null,
-   "order": 17
-  },
-  {
-   "id": "18b",
-   "card": "18",
-   "title": "Vin и таблички",
-   "part": " · часть 2 из 2: таблички на двери",
-   "circle": 2,
-   "section": "Таблички/VIN",
-   "priority": "must",
-   "rhythm": 8,
-   "perm": [],
-   "state": [
-    "doorOpen"
-   ],
-   "opens": null,
-   "order": 18
-  },
-  {
-   "id": "20",
-   "card": "20",
-   "title": "Приборы крупно",
-   "part": "",
-   "circle": 3,
-   "section": "Салон",
-   "priority": "must",
-   "rhythm": 0,
-   "perm": [],
-   "state": [
-    "doorOpen"
-   ],
-   "opens": null,
-   "order": 19
-  },
-  {
-   "id": "21",
-   "card": "21",
-   "title": "Руль и эмблема",
-   "part": "",
-   "circle": 3,
-   "section": "Салон",
-   "priority": "must",
-   "rhythm": 7,
-   "perm": [],
-   "state": [
-    "doorOpen"
-   ],
-   "opens": null,
-   "order": 20
-  },
-  {
-   "id": "22",
-   "card": "22",
-   "title": "Рычаг кпп и схема",
-   "part": "",
-   "circle": 3,
-   "section": "Салон",
-   "priority": "must",
-   "rhythm": 7,
-   "perm": [],
-   "state": [
-    "doorOpen"
-   ],
-   "opens": null,
-   "order": 21
-  },
-  {
-   "id": "23",
-   "card": "23",
-   "title": "Сиденья и обивка",
-   "part": "",
-   "circle": 3,
-   "section": "Салон",
-   "priority": "must",
-   "rhythm": 4,
-   "perm": [],
-   "state": [
-    "doorOpen"
-   ],
-   "opens": null,
-   "order": 22
-  },
-  {
-   "id": "24",
-   "card": "24",
-   "title": "Дверная карта",
-   "part": "",
-   "circle": 3,
-   "section": "Салон",
-   "priority": "must",
-   "rhythm": 5,
-   "perm": [],
-   "state": [
-    "doorOpen"
-   ],
-   "opens": null,
-   "order": 23
-  },
-  {
-   "id": "25",
-   "card": "25",
-   "title": "Радио, консоль, педали",
-   "part": "",
-   "circle": 3,
-   "section": "Салон",
-   "priority": "optional",
-   "rhythm": 9,
-   "perm": [],
-   "state": [
-    "doorOpen"
-   ],
-   "opens": null,
-   "order": 24
-  },
-  {
-   "id": "26",
-   "card": "26",
-   "title": "Рука на руле, ключ",
-   "part": "",
-   "circle": 3,
-   "section": "Жесты",
-   "priority": "optional",
-   "rhythm": 4,
-   "perm": [
-    "touch"
-   ],
-   "state": [
-    "doorOpen"
-   ],
-   "opens": null,
-   "order": 25
-  },
-  {
-   "id": "27",
-   "card": "27",
-   "title": "Поднять капот",
-   "part": "",
-   "circle": 3,
-   "section": "Жесты",
-   "priority": "must",
-   "rhythm": 4,
-   "perm": [
-    "hood"
-   ],
-   "state": [
-    "hoodClosed"
-   ],
-   "opens": "hoodOpen",
-   "order": 26
-  },
-  {
-   "id": "12",
-   "card": "12",
-   "title": "Мотор — облёт сверху",
-   "part": "",
-   "circle": 2,
-   "section": "Мотор",
-   "priority": "optional",
-   "rhythm": 4,
-   "perm": [],
-   "state": [
-    "hoodOpen"
-   ],
-   "opens": null,
-   "order": 27
-  },
-  {
-   "id": "16",
-   "card": "16",
-   "title": "Звук мотора у выхлопа",
-   "part": "",
-   "circle": 2,
-   "section": "Звук и движение",
-   "priority": "optional",
-   "rhythm": 0,
-   "perm": [
-    "engine"
-   ],
-   "state": [],
-   "opens": null,
-   "order": 28
-  },
-  {
-   "id": "28",
-   "card": "28",
-   "title": "Фары включаются",
-   "part": "",
-   "circle": 3,
-   "section": "Жесты",
-   "priority": "optional",
-   "rhythm": 0,
-   "perm": [
-    "touch"
-   ],
-   "state": [
-    "doorOpen"
-   ],
-   "opens": null,
-   "order": 29
-  }
- ],
- "modes": [
-  {
-   "id": "first",
-   "name": "Первое касание",
-   "desc": "Без доступа. После каждого круга спросим: «Есть доступ?»",
-   "ids": [
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-    "10",
-    "11",
-    "13",
-    "14",
-    "15",
-    "18a",
-    "19",
-    "17",
-    "18b",
-    "20",
-    "21",
-    "22",
-    "23",
-    "24",
-    "25",
-    "26",
-    "27",
-    "12",
-    "16",
-    "28"
-   ],
-   "kind": "progressive",
-   "start": 1,
-   "access": "none",
-   "default": true,
-   "minutes": 24
-  },
-  {
-   "id": "full",
-   "name": "Полный",
-   "desc": "Своя машина: всё можно открывать",
-   "ids": [
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-    "10",
-    "11",
-    "13",
-    "14",
-    "15",
-    "18a",
-    "19",
-    "17",
-    "18b",
-    "20",
-    "21",
-    "22",
-    "23",
-    "24",
-    "25",
-    "26",
-    "27",
-    "12",
-    "16",
-    "28"
-   ],
-   "kind": "progressive",
-   "start": 1,
-   "access": "all",
-   "minutes": 24
-  },
-  {
-   "id": "must",
-   "name": "Обязательное",
-   "desc": "Только важное, одним списком",
-   "ids": [
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-    "10",
-    "11",
-    "13",
-    "14",
-    "15",
-    "18a",
-    "19",
-    "17",
-    "18b",
-    "20",
-    "21",
-    "22",
-    "23",
-    "24",
-    "27"
-   ],
-   "kind": "fixed",
-   "minutes": 20
-  },
-  {
-   "id": "c1",
-   "name": "Только круг 1",
-   "desc": "Внешний обход",
-   "ids": [
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9"
-   ],
-   "kind": "fixed",
-   "minutes": 7
-  },
-  {
-   "id": "c2",
-   "name": "Только круг 2",
-   "desc": "Детали и надписи",
-   "ids": [
-    "10",
-    "11",
-    "13",
-    "14",
-    "15",
-    "18a",
-    "17",
-    "18b",
-    "12",
-    "16"
-   ],
-   "kind": "fixed",
-   "minutes": 8
-  },
-  {
-   "id": "c3",
-   "name": "Только круг 3",
-   "desc": "Салон и жесты",
-   "ids": [
-    "19",
-    "20",
-    "21",
-    "22",
-    "23",
-    "24",
-    "25",
-    "26",
-    "27",
-    "28"
-   ],
-   "kind": "fixed",
-   "minutes": 8
-  },
-  {
-   "id": "quick",
-   "name": "Быстрая эффектная",
-   "desc": "Яркие кадры за 2–3 минуты",
-   "ids": [
-    "1",
-    "3",
-    "6",
-    "14",
-    "19",
-    "27"
-   ],
-   "kind": "fixed",
-   "minutes": 5
-  }
- ],
- "order": [
-  "1",
-  "2",
-  "3",
-  "4",
-  "5",
-  "6",
-  "7",
-  "8",
-  "9",
-  "10",
-  "11",
-  "13",
-  "14",
-  "15",
-  "18a",
-  "19",
-  "17",
-  "18b",
-  "20",
-  "21",
-  "22",
-  "23",
-  "24",
-  "25",
-  "26",
-  "27",
-  "12",
-  "16",
-  "28"
- ],
- "maps": {
-  "1": "00z_karta_krug1",
-  "2": "09z_karta_krug2",
-  "3": "18z_karta_krug3"
+ "pre": {
+  "id": "pre",
+  "tag": "Перед съёмкой",
+  "card": "pre",
+  "label": "Перед съёмкой",
+  "note": "Протри камеру · заряд и место · 4K и сетка · «Не беспокоить» · солнце за спиной"
  },
- "pre": "00a_pered_semkoy"
+ "routes": [
+  {
+   "id": "out",
+   "title": "Снаружи",
+   "maps": [
+    {
+     "card": "map_out1",
+     "title": "Круг 1 · общий план",
+     "short": "Круг 1"
+    },
+    {
+     "card": "map_out2",
+     "title": "Круг 2 · ближе",
+     "short": "Круг 2"
+    }
+   ],
+   "points": [
+    {
+     "id": "1",
+     "tag": "1",
+     "point": 1,
+     "plus": false,
+     "card": "01",
+     "map": "map_out1",
+     "label": "Подход низко к передку ¾"
+    },
+    {
+     "id": "1p",
+     "tag": "1+",
+     "point": 1,
+     "plus": true,
+     "card": "01p",
+     "map": "map_out2",
+     "label": "Фары — дуга с 1 м"
+    },
+    {
+     "id": "2",
+     "tag": "2",
+     "point": 2,
+     "plus": false,
+     "card": "02",
+     "map": "map_out1",
+     "label": "Строго спереди"
+    },
+    {
+     "id": "2p",
+     "tag": "2+",
+     "point": 2,
+     "plus": true,
+     "card": "02p",
+     "map": "map_out2",
+     "label": "Эмблема на решётке"
+    },
+    {
+     "id": "3",
+     "tag": "3",
+     "point": 3,
+     "plus": false,
+     "card": "03",
+     "map": "map_out1",
+     "label": "Дуга вокруг передка"
+    },
+    {
+     "id": "3p",
+     "tag": "3+",
+     "point": 3,
+     "plus": true,
+     "card": "03p",
+     "map": "map_out2",
+     "label": "Шильдик на крыле"
+    },
+    {
+     "id": "4",
+     "tag": "4",
+     "point": 4,
+     "plus": false,
+     "card": "04",
+     "map": "map_out1",
+     "label": "Краб вдоль борта"
+    },
+    {
+     "id": "4p",
+     "tag": "4+",
+     "point": 4,
+     "plus": true,
+     "card": "04p",
+     "map": "map_out2",
+     "label": "Колесо — стоп и наклон"
+    },
+    {
+     "id": "5",
+     "tag": "5",
+     "point": 5,
+     "plus": false,
+     "card": "05",
+     "map": "map_out1",
+     "label": "Строгий профиль справа"
+    },
+    {
+     "id": "5p",
+     "tag": "5+",
+     "point": 5,
+     "plus": true,
+     "card": "05p",
+     "map": "map_out2",
+     "label": "Зеркало и ручка двери"
+    },
+    {
+     "id": "6",
+     "tag": "6",
+     "point": 6,
+     "plus": false,
+     "card": "06",
+     "map": "map_out1",
+     "label": "Дуга вокруг кормы"
+    },
+    {
+     "id": "6p",
+     "tag": "6+",
+     "point": 6,
+     "plus": true,
+     "card": "06p",
+     "map": "map_out2",
+     "label": "Фонари и выхлоп"
+    },
+    {
+     "id": "7",
+     "tag": "7",
+     "point": 7,
+     "plus": false,
+     "card": "07",
+     "map": "map_out1",
+     "label": "Строго сзади"
+    },
+    {
+     "id": "7p",
+     "tag": "7+",
+     "point": 7,
+     "plus": true,
+     "card": "07p",
+     "map": "map_out2",
+     "label": "Звук мотора у выхлопа (если заведут)"
+    },
+    {
+     "id": "8",
+     "tag": "8",
+     "point": 8,
+     "plus": false,
+     "card": "08",
+     "map": "map_out1",
+     "label": "Краб вдоль левого борта"
+    },
+    {
+     "id": "8p",
+     "tag": "8+",
+     "point": 8,
+     "plus": true,
+     "card": "08p",
+     "map": "map_out2",
+     "label": "Салон через открытое окно (если открыто)"
+    },
+    {
+     "id": "9",
+     "tag": "9",
+     "point": 9,
+     "plus": false,
+     "card": "09",
+     "map": "map_out1",
+     "label": "Сверху на передок"
+    },
+    {
+     "id": "9p",
+     "tag": "9+",
+     "point": 9,
+     "plus": true,
+     "card": "09p",
+     "map": "map_out2",
+     "label": "Мотор — облёт сверху (если капот открыт)"
+    },
+    {
+     "id": "vin",
+     "tag": "VIN",
+     "point": null,
+     "plus": false,
+     "card": "vin",
+     "map": "map_out2",
+     "label": "VIN · финал",
+     "note": "Отдельный короткий кадр в самом конце: вплотную к стеклу, под углом, блик ладонью, 3 с неподвижно"
+    }
+   ]
+  },
+  {
+   "id": "salon",
+   "title": "Салон",
+   "maps": [
+    {
+     "card": "map_salon",
+     "title": "Салон",
+     "short": "Салон"
+    }
+   ],
+   "note": "Если окно или дверь открыты",
+   "points": [
+    {
+     "id": "19",
+     "tag": "19",
+     "point": null,
+     "plus": false,
+     "card": "19",
+     "map": "map_salon",
+     "label": "Открыть дверь рукой"
+    },
+    {
+     "id": "17",
+     "tag": "17",
+     "point": null,
+     "plus": false,
+     "card": "17",
+     "map": "map_salon",
+     "label": "Салон из двери водителя"
+    },
+    {
+     "id": "20",
+     "tag": "20",
+     "point": null,
+     "plus": false,
+     "card": "20",
+     "map": "map_salon",
+     "label": "Приборы крупно"
+    },
+    {
+     "id": "21",
+     "tag": "21",
+     "point": null,
+     "plus": false,
+     "card": "21",
+     "map": "map_salon",
+     "label": "Руль и эмблема"
+    },
+    {
+     "id": "22",
+     "tag": "22",
+     "point": null,
+     "plus": false,
+     "card": "22",
+     "map": "map_salon",
+     "label": "Рычаг КПП и схема"
+    },
+    {
+     "id": "23",
+     "tag": "23",
+     "point": null,
+     "plus": false,
+     "card": "23",
+     "map": "map_salon",
+     "label": "Сиденья и обивка"
+    },
+    {
+     "id": "24",
+     "tag": "24",
+     "point": null,
+     "plus": false,
+     "card": "24",
+     "map": "map_salon",
+     "label": "Дверная карта"
+    },
+    {
+     "id": "25",
+     "tag": "25",
+     "point": null,
+     "plus": false,
+     "card": "25",
+     "map": "map_salon",
+     "label": "Радио, консоль, педали"
+    },
+    {
+     "id": "26",
+     "tag": "26",
+     "point": null,
+     "plus": false,
+     "card": "26",
+     "map": "map_salon",
+     "label": "Рука на руле, ключ"
+    },
+    {
+     "id": "27",
+     "tag": "27",
+     "point": null,
+     "plus": false,
+     "card": "27",
+     "map": "map_salon",
+     "label": "Поднять капот"
+    },
+    {
+     "id": "28",
+     "tag": "28",
+     "point": null,
+     "plus": false,
+     "card": "28",
+     "map": "map_salon",
+     "label": "Фары включаются"
+    }
+   ]
+  }
+ ]
 }

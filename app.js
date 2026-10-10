@@ -1,504 +1,222 @@
-// Three Laps — интерфейс. Логика в logic.js (чистые функции, тесты logic.test.mjs), хранилище в store.js.
+// Three Laps v0.5 — шпаргалка и тренажёр маршрута обхода (ТЗ v4.1). Маршрут — logic.js + shots.json, фразы — content.js.
 import * as L from "./logic.js";
 import * as S from "./store.js";
-import { TALK, TALK_FLAT, FIELDS, talkLine, ONBOARD, carIcon, nextIcon } from "./content.js";
+import { TALK, TALK_FLAT, talkLine, DEFAULT_NAME } from "./content.js";
 
+const VERSION = "v0.5";
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const root = $("#app");
-const errs = () => { try { return JSON.parse(localStorage.getItem("tl_errs") || "[]"); } catch { return []; } };
-function logErr(m) { const a = errs(); a.push({ ts: Date.now(), m: String(m).slice(0, 300) }); while (a.length > 30) a.shift(); try { localStorage.setItem("tl_errs", JSON.stringify(a)); } catch { /* */ } }
-addEventListener("error", (e) => logErr(`${e.message} @${String(e.filename || "").split("/").pop()}:${e.lineno}`));
-addEventListener("unhandledrejection", (e) => logErr("promise: " + ((e.reason && e.reason.message) || e.reason)));
 
 const app = {
-  data: null, sessions: [], cur: null, screen: "home", stack: [], settings: { theme: "auto", wake: true, vibrate: true, onboarded: false },
-  filter: "all", bugs: [], version: "?", select: null, temp: null, draft: null, newDraft: null, toast: null, pre: { n: 0, total: 0, ready: false },
-  hold: false, sheet: null, owner: null, exact: false, talkSec: null,
+  data: null, tab: S.get("tab", "map"), rid: S.get("rid", "out"),
+  learn: S.get("learn", { out: 0, salon: 0 }), shown: false,
+  mapk: S.get("mapk", 0),    // какая карта «Снаружи» открыта на вкладке «Карта»: 0 — круг 1, 1 — круг 2
+  viewer: null,      // { rid, i } — листание по маршруту | { card, tag, label } — одна карточка (карта, «Перед съёмкой»)
+  phrase: null,      // индекс в TALK_FLAT — фраза крупно для хозяина
+  settingsOpen: false,
+  settings: { theme: "auto", name: DEFAULT_NAME, ...S.get("settings", {}) },
+  build: "", update: false, checking: false, pre: { n: 0, total: 0, ready: false },
 };
-const CIRCLE = { 1: "Внешний обход", 2: "Детали и надписи", 3: "Салон и жесты" };
-const LABEL = { done: "снято", skipped: "потом", locked: "ждёт доступа", na: "не нужно", auto: "уже открыто", todo: "" };
-const LOCK = `<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V11a1 1 0 0 1 1-1h1zm2 0h6V7a3 3 0 0 0-6 0v3z"/></svg>`;
-const BADGE = { done: "✓", skipped: "→", locked: LOCK, na: "–", auto: "–", todo: "" };
-const NEED = { touch: "разрешение трогать", door: "разрешение открыть дверь", hood: "разрешение открыть капот", engine: "разрешение завести мотор",
-  doorOpen: "открытая дверь", hoodOpen: "открытый капот", doorClosed: "закрытая дверь", hoodClosed: "закрытый капот" };
-const PERMS = [["touch", "Трогать машину"], ["door", "Открывать дверь"], ["hood", "Открывать капот"], ["engine", "Заводить мотор"]];
-const ACCESS = {   // быстрые ответы на «Есть доступ?»
-  both: { label: "Да: дверь и капот можно", perms: { touch: true, door: true, hood: true }, cls: "go" },
-  door: { label: "Только дверь (салон)", perms: { touch: true, door: true } },
-  hood: { label: "Только капот (мотор)", perms: { touch: true, hood: true } },
-  none: { label: "Нет доступа (только снаружи)", perms: {} },
-};
+
 const theme = () => (app.settings.theme === "auto" ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light") : app.settings.theme);
-const cardSrc = (n, thumb) => `cards/${theme()}/${thumb ? "thumb/" : ""}${n}.webp`;
-const shotOf = (id) => app.data.shots.find((x) => x.id === id);
-const buzz = (ms = 15) => { if (app.settings.vibrate && navigator.vibrate) navigator.vibrate(ms); };
-const accessText = (s) => { const on = [s.perms.door && "дверь", s.perms.hood && "капот", s.perms.engine && "мотор", s.perms.touch && !s.perms.door && !s.perms.hood && "трогать"].filter(Boolean); return on.length ? on.join(", ") : "нет"; };
+const src = (card, thumb) => L.cardPath(card, theme(), thumb);
+// картинка карточки; если файла ещё нет — аккуратная заглушка с подписью (см. обработчик error ниже)
+const missing = new Set();   // адреса карточек, которых нет: при перерисовке сразу заглушка, без мигания
+const placeholder = (cls, tag, label) => `<div class="phc ${cls}"><b>${esc(tag)}</b><span>${esc(label)}</span><small>Карточка появится в обновлении</small></div>`;
+const img = (card, tag, label, cls = "cd", thumb = false) => missing.has(src(card, thumb)) ? placeholder(cls, tag, label)
+  : `<img class="${cls}" src="${src(card, thumb)}" alt="${esc(label)}" data-tag="${esc(tag)}" data-label="${esc(label)}" draggable="false">`;
+const mapLabel = (r, m) => (r.maps.length > 1 ? `${r.title} · ${m.title}` : `Карта · ${r.title}`);
+const pointTag = (p) => (p.id === "vin" ? "Финал" : `Точка ${p.tag}`);
 
-// ---------- навигация ----------
-function go(screen) {
-  if (app.screen !== screen) app.stack.push(app.screen);
-  app.screen = screen; app.sheet = null; render(); history.pushState({}, "");
-}
-function back() {
-  const p = app.stack.pop();
-  if (!p) { history.pushState({}, ""); return; }
-  app.screen = p; app.sheet = null; render(); history.pushState({}, "");
-}
-addEventListener("popstate", () => {   // системная «Назад»: сначала закрываем лист/белый экран, потом шаг назад; приложение не закрывается
-  if (app.owner !== null) { app.owner = null; render(); history.pushState({}, ""); return; }
-  if (app.sheet) { app.sheet = null; render(); history.pushState({}, ""); return; }
-  back();
-});
-const remember = () => { try { localStorage.setItem("tl_resume", app.cur && app.screen !== "home" ? app.cur.id : ""); } catch { /* */ } };
-
-// ---------- сессия ----------
-async function commit(s) {
-  app.cur = s; const i = app.sessions.findIndex((x) => x.id === s.id);
-  if (i >= 0) app.sessions[i] = s; else app.sessions.push(s);
-  await S.saveSession(s);
-}
-async function doAct(a, opts = {}) {
-  const before = app.cur, lockedBefore = L.lockedList(app.data, before);
-  const s = L.act(app.data, before, a); if (s === before) return false;
-  await commit(s);
-  const unlocked = lockedBefore.filter((i) => !L.lockedList(app.data, s).includes(i) && L.effective(s, shotOf(i)) === "todo");
-  if (opts.toast) showToast(opts.toast, "Отменить", () => doUndo());
-  if (unlocked.length && ["setPerm", "setState"].includes(a.type)) showToast(`Открылось: ${unlocked.join(", ")}`, "Снять сейчас", () => { app.sheet = null; jump(unlocked[0]); }, 7000);
-  return true;
-}
-async function doUndo() { const s = L.undo(app.cur); if (s !== app.cur) { await commit(s); clearToast(); toNext(true); } }
-let tt = null;
-function showToast(msg, label, fn, ms = 5000) { app.toast = { msg, label, fn }; render(); clearTimeout(tt); tt = setTimeout(clearToast, ms); }
-function clearToast() { app.toast = null; clearTimeout(tt); const t = $(".toast"); if (t) t.remove(); }
-
-function needMap() {   // карта круга — один раз, только для кадров текущего круга (жесты-«открывашки» из 3-го круга карту не вызывают)
-  const s = app.cur, sh = s && shotOf(s.cursor);
-  if (!sh || app.temp || s.mapsSeen[sh.circle] || s.modeId === "quick") return false;
-  return !s.circleNow || sh.circle === s.circleNow || !L.isProgressive(app.data, s);
-}
-// куда вести: кадр, временная очередь «подряд» или экран конца очереди
-function toNext(keepScreen) {
-  const s = app.cur;
-  if (app.temp) {
-    const rest = app.temp.ids.filter((i) => i !== app.temp.from && ["todo", "skipped"].includes(L.effective(s, shotOf(i))) && !app.temp.seen.includes(i));
-    if (rest.length) { app.cur = { ...s, cursor: rest[0] }; app.screen = "frame"; render(); return; }
-    const t0 = app.temp, back = t0.back; app.temp = null;
-    if (t0.ret) { app.screen = "talk"; app.talkSec = t0.ret; render(); showToast(`Готово: ${t0.label} снято`, "", null, 2500); return; }
-    if (back && ["todo", "skipped"].includes(L.effective(s, shotOf(back)))) { app.cur = { ...s, cursor: back }; app.screen = "frame"; render(); return; }
-  }
-  if (keepScreen && !["frame", "map"].includes(app.screen) && app.screen !== "summary") { render(); return; }
-  app.screen = s.cursor ? (needMap() ? "map" : "frame") : (L.endState(app.data, s) || "summary");
-  render(); remember();
-}
-async function shotAction(type, id) {
-  if (app.temp) { app.temp.seen.push(id); app.temp.from = id; }
-  const ok = await doAct({ type, id }, { toast: { done: "Снято", skip: "Отложено на потом", na: "Не нужен" }[type] });
-  if (ok) toNext();
-}
-function jump(id) { app.cur = { ...app.cur, cursor: id }; commit(app.cur); app.screen = needMap() ? "map" : "frame"; app.sheet = null; render(); history.pushState({}, ""); remember(); }
-
-// ---------- части экранов ----------
-const tog = (k, t, on, grp) => `<div class="tog" data-a="tog" data-g="${grp}" data-id="${k}" role="switch" aria-checked="${!!on}"><span>${esc(t)}</span><span class="sw ${on ? "on" : ""}"></span></div>`;
-const sheet = (h) => `<div class="sheet-bg" data-a="bg"><div class="sheet" data-a="nop">${h}</div></div>`;
-function accessBlock(kind) {   // общий блок «Есть доступ?» для перехода к кругу и для экрана разрешений
-  const d = app.draft;
-  return `<div class="title" style="margin-top:10px">Есть доступ к машине?</div>
-    <div class="small mut">Хозяин разрешил открыть дверь или капот? Если нет — снимем то, что можно снаружи, остальное подождёт в итоге.</div>
-    <button class="link" data-a="phrases">Сначала спросить: готовые фразы по-английски ›</button>
-    ${["both", "door", "hood", "none"].map((k) => `<button class="btn ${ACCESS[k].cls || (k === "none" ? "" : "ghost")}" data-a="acc" data-id="${k}" data-k="${kind}">${ACCESS[k].label}</button>`).join("")}
-    ${tog("engine", "+ можно завести мотор (записать звук)", d.perms.engine, "pdraft")}
-    <button class="link" data-a="exact">${app.exact ? "Скрыть подробности" : "Точнее: что разрешено и что уже открыто"}</button>
-    ${app.exact ? `<div class="card">${PERMS.map(([k, t]) => tog(k, t, d.perms[k], "pdraft")).join("")}
-      <div class="small mut" style="margin-top:8px">УЖЕ ОТКРЫТО (САМ ХОЗЯИН)</div>${tog("doorOpen", "Дверь открыта", d.states.doorOpen, "sdraft")}${tog("hoodOpen", "Капот открыт", d.states.hoodOpen, "sdraft")}
-      <button class="btn go" data-a="acc" data-id="exact" data-k="${kind}">Применить и снимать</button></div>` : ""}
-`;
-}
-function segs(s, ids) {   // полоска прогресса: точка = отрезок цвета статуса
-  return `<div class="segs">${ids.map((i) => `<i class="${L.effective(s, shotOf(i))} ${i === s.cursor ? "cur" : ""}"></i>`).join("")}</div>`;
-}
-function rowShot(s, id) {
-  const sh = shotOf(id), e = L.effective(s, sh);
-  return `<button class="rowshot ${e}" data-a="tile" data-id="${id}"><img src="${cardSrc(sh.card, 1)}" alt=""><span class="grow"><b>${esc(sh.id)} · ${esc(sh.title)}</b><span class="sub">${LABEL[e] || "не снято"}</span></span></button>`;
-}
-function modeTile(m, on, act) {
-  const meta = m.kind === "progressive" ? "3 круга · до 29 точек" : `${m.ids.length} точек · ~${m.minutes} мин`;
-  return `<button class="mode ${on ? "on" : ""}" data-a="${act}" data-id="${m.id}"><b>${esc(m.name)}</b> <span class="pill">${meta}</span><span>${esc(m.desc)}</span></button>`;
-}
-
-// ---------- разрешения из разговора: «Да, разрешил» → сразу карточки съёмки → назад к следующему вопросу ----------
-const OPENS = { door: "doorOpen", hood: "hoodOpen" };
-const GRANT = { door: "дверь", hood: "капот", engine: "мотор", touch: "можно трогать" };
-function grantShots(s, key) {   // точки, ради которых просили: жест-«открывашка», потом всё, что ждёт этого доступа
-  return app.data.order.filter((i) => { const sh = shotOf(i);
-    const rel = sh.perm.includes(key) || (OPENS[key] && (sh.state.includes(OPENS[key]) || sh.opens === OPENS[key]));
-    return rel && !["done", "na", "auto"].includes(L.effective(s, sh)); });
-}
-function grantUI(s, l) {
-  const k = l.grant, on = s.perms[k] || (OPENS[k] && s.states[OPENS[k]]), left = on ? grantShots(s, k).filter((i) => shotOf(i).perm.every((p) => s.perms[p]) && !["done", "na", "auto"].includes(L.effective(s, shotOf(i)))).length : 0;
-  const ans = s.qs[l.id] && s.qs[l.id].answer;
-  if (on) return `<div class="row" style="margin-top:8px"><span class="pill okp">Разрешено ✓</span>${left ? `<button class="btn go mini" data-a="grantgo" data-id="${l.id}">Снять сейчас (${left})</button>` : `<span class="small mut">всё снято</span>`}</div>`;
-  return `<div class="row" style="margin-top:8px"><button class="btn go mini" data-a="grant" data-id="${l.id}">Да, разрешил</button>
-    ${OPENS[k] ? `<button class="btn mini" data-a="grantself" data-id="${l.id}">Открыл сам</button>` : ""}<button class="btn mini ${ans === "нет" ? "dark" : ""}" data-a="deny" data-id="${l.id}">Нет</button></div>`;
-}
-const nextLineAnchor = (id) => { const i = TALK_FLAT.findIndex((x) => x.id === id); const n = TALK_FLAT[i + 1]; return n ? "ln-" + n.id : null; };
-async function startGrant(lineId, self) {
-  const l = TALK_FLAT.find((x) => x.id === lineId), k = l.grant;
-  if (self && OPENS[k]) await doAct({ type: "setState", key: OPENS[k], value: true }); else if (!app.cur.perms[k]) await doAct({ type: "setPerm", key: k, value: true });
-  await doAct({ type: "answer", q: lineId, v: { asked: true, answer: self ? "открыл сам" : "да" } });
-  const ids = grantShots(app.cur, k).filter((i) => shotOf(i).perm.every((p) => app.cur.perms[p]));   // без других недостающих разрешений
-  for (const i of ids) if (!L.modeIds(app.data, app.cur).includes(i)) await doAct({ type: "addExtra", id: i });
-  const ready = ids.filter((i) => ["todo", "skipped"].includes(L.effective(app.cur, shotOf(i))));
-  if (!ready.length) { showToast("Отмечено. Снимать по этому разрешению нечего", "", null, 2500); app.talkSec = nextLineAnchor(lineId); render(); return; }
-  app.temp = { ids, seen: [], back: null, from: null, ret: nextLineAnchor(lineId) || "ln-" + lineId, label: GRANT[k] };
-  app.stack.push("talk"); jump(ready[0]);
-}
+const ICON = {
+  map: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2zm0 2.2 6 2v11.6l-6-2V6.2z" fill="currentColor"/></svg>`,
+  learn: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 1 9l11 6 9-4.9V17h2V9L12 3zM5 13.2V17l7 4 7-4v-3.8l-7 3.8-7-3.8z" fill="currentColor"/></svg>`,
+  talk: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" fill="currentColor"/></svg>`,
+  gear: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.7 7.7 0 0 0-1.7-1L15 3h-4l-.4 2.9a7.7 7.7 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1c.5.4 1.1.7 1.7 1L11 21h4l.4-2.9c.6-.3 1.2-.6 1.7-1l2.5 1 2-3.5-2.2-1.6zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" fill="currentColor" transform="translate(-1 0)"/></svg>`,
+};
+const TABS = [["map", "Карта"], ["learn", "Учить"], ["talk", "Фразы"]];
 
 // ---------- экраны ----------
+const seg = () => `<div class="seg" role="tablist">${app.data.routes.map((r) =>
+  `<button role="tab" aria-selected="${app.rid === r.id}" class="${app.rid === r.id ? "on" : ""}" data-a="rid" data-id="${r.id}">${esc(r.title)}</button>`).join("")}</div>`;
+
 const view = {
-  home() {
-    const list = [...app.sessions].sort((a, b) => b.updatedAt - a.updatedAt);
-    const live = list.find((s) => s.status !== "closed");
-    const off = app.pre.ready ? "Офлайн готов ✓" : app.pre.total ? `Загрузка для офлайна ${app.pre.n}/${app.pre.total}` : "Работает без интернета";
-    const prog = (s) => { const c = L.counts(app.data, s); return `${s.circleNow ? `круг ${s.circleNow} · ` : ""}снято ${c.done}${c.skipped ? ` · потом ${c.skipped}` : ""}`; };
-    return `<div class="scr"><h1>Three Laps</h1><div class="mut">Три круга вокруг машины</div><div class="verline"><span class="small mut">${off} · версия ${esc(app.version)}</span><button class="upd" data-a="refresh">${app.checking ? "Проверяю…" : "Обновить"}</button></div>
-      ${app.update ? `<button class="btn yel" data-a="update">Есть обновление: применить</button>` : ""}
-      ${live ? `<div class="card hero" data-a="open" data-id="${live.id}"><div class="row"><div class="ico">${live.photo ? `<img src="${live.photo}" class="phot">` : carIcon(live.icon, 84)}</div>
-        <div class="grow"><div class="title">${esc(live.name || "Машина без названия")}</div><div class="sub">${prog(live)}</div></div></div>
-        <button class="btn pri" style="margin-bottom:0">Продолжить съёмку</button></div>` : ""}
-      <button class="btn dark" data-a="new">Новая съёмка</button>
-      ${list.length ? "<h2 style='margin-top:18px'>Мои съёмки</h2>" : `<div class="card mut">Съёмок пока нет. Нажмите «Новая съёмка».</div>`}
-      ${list.map((s) => { const stt = s.status === "closed" ? "закрыта" : s.status === "paused" ? "пауза" : "идёт";
-        return `<div class="card row"><div class="row grow" data-a="open" data-id="${s.id}"><div class="ico">${s.photo ? `<img src="${s.photo}" class="phot">` : carIcon(s.icon, 84)}</div>
-          <div class="grow"><div class="title">${esc(s.name || "Машина без названия")}</div><div class="sub">${prog(s)} · ${stt} · ${new Date(s.updatedAt).toLocaleDateString("ru")}</div></div></div>
-          <button class="dots3" data-a="sessmenu" data-id="${s.id}" aria-label="Меню съёмки">⋯</button></div>`; }).join("")}
-      <div class="row" style="margin-top:14px"><button class="btn ghost" data-a="settings">Настройки</button><button class="btn ghost" data-a="bug">Заметил ошибку</button></div>
-      <div class="small mut" style="text-align:center;margin-top:8px">Всё хранится в вашем телефоне</div></div>`;
-  },
-  onboard() {
-    const i = app.ob || 0; const [t, d] = ONBOARD[i];
-    return `<div class="scr center"><div class="dots">${ONBOARD.map((_, k) => `<i class="${k === i ? "on" : ""}"></i>`).join("")}</div>
-      <h1 style="text-align:center">${esc(t)}</h1><p class="mut" style="text-align:center;font-size:18px">${esc(d)}</p>
-      <button class="btn pri" data-a="ob-next">${i === ONBOARD.length - 1 ? "Начать" : "Дальше"}</button><button class="btn ghost" data-a="ob-skip">Пропустить</button></div>`;
-  },
-  new() {
-    const d = app.newDraft, m = L.modeInfo(app.data, d.modeId);
-    return `<div class="scr"><h2>Новая съёмка</h2>
-      <div class="card"><div class="row"><div class="ico big">${d.photo ? `<img src="${d.photo}" class="phot">` : carIcon(d.icon, 100)}</div>
-        <div class="grow"><input type="text" id="nm" placeholder="Название (необязательно)" value="${esc(d.name)}"></div></div>
-        <div class="row" style="margin-top:8px"><button class="btn mini" data-a="icon">Другой значок</button><label class="btn mini">Фото<input type="file" accept="image/*" capture="environment" id="ph" hidden></label></div></div>
-      <h2>Режим</h2><div class="modes">${app.data.modes.map((x) => modeTile(x, d.modeId === x.id, "mode")).join("")}</div>
-      ${m.access === "all" ? `<div class="card small">Всё разрешено: дверь, капот, мотор.</div>` : m.kind === "progressive"
-        ? `<div class="card small">Начинаем без доступа. После каждого круга приложение спросит: «Есть доступ?»</div>`
-        : `<button class="link" data-a="dexact">${d.exact ? "Скрыть доступ" : "Доступ уже есть? (необязательно)"}</button>${d.exact ? PERMS.map(([k, t]) => tog(k, t, d.perms[k], "dperm")).join("") : ""}`}
-      </div><div class="bar"><button class="btn ghost b3" data-a="home">Отмена</button><button class="btn go b1" data-a="start">Поехали ›</button></div>`;
-  },
-  pre() { return `<div class="top"><div class="p">Перед съёмкой</div></div><div class="cw"><img class="cd" src="${cardSrc(app.data.pre)}" alt=""></div><div class="bar"><button class="btn go b1" data-a="pre-ok">Дальше</button></div>`; },
   map() {
-    const c = shotOf(app.cur.cursor).circle;
-    return `<div class="top"><div class="p">Круг ${c} · ${CIRCLE[c]}<small>карта обхода</small></div><button class="allbtn" data-a="list">▦ Все кадры</button></div>
-      <div class="cw"><img class="cd" src="${cardSrc(app.data.maps[c])}" alt=""></div><div class="bar"><button class="btn go b1" data-a="map-ok">Понятно, начать круг ${c}</button></div>`;
+    const r = L.route(app.data, app.rid), k = Math.min(app.mapk, r.maps.length - 1), m = r.maps[k];
+    const msw = r.maps.length > 1 ? `<div class="seg small2">${r.maps.map((x, j) => `<button class="${j === k ? "on" : ""}" data-a="mapk" data-id="${j}">${esc(x.title)}</button>`).join("")}</div>` : "";
+    const rows = L.groups(app.data, app.rid).map((g) => `<div class="pt"><span class="num ${g.point == null && g.tag === "VIN" ? "fin" : ""}">${esc(g.tag)}</span><div class="pt-lines">${g.items.map(({ p, i }) =>
+      `<button class="pl" data-a="open" data-i="${i}">${p.plus ? `<b class="plus">+</b>` : ""}<span>${esc(p.label)}</span></button>`).join("")}</div></div>`).join("");
+    return `${seg()}
+      ${msw}<button class="mapbox" data-a="mapfull" data-id="${k}" aria-label="Открыть карту во весь экран">${img(m.card, "Карта", mapLabel(r, m), "mapimg")}</button>
+      <button class="btn pre" data-a="pre">Перед съёмкой</button>
+      ${r.note ? `<div class="note">${esc(r.note)}</div>` : ""}
+      <div class="pts">${rows}</div>`;
   },
-  frame() {
-    const s = app.cur, sh = shotOf(s.cursor), e = L.effective(s, sh), ids = L.modeIds(app.data, s);
-    const prog = L.isProgressive(app.data, s);
-    const inSet = ids.includes(sh.id);
-    const circleIds = prog || s.modeId.startsWith("c") ? ids.filter((i) => shotOf(i).circle === sh.circle) : ids;
-    const c = L.counts(app.data, s, prog || s.modeId.startsWith("c") ? sh.circle : null);
-    const pos = circleIds.indexOf(sh.id) + 1;
-    const need = L.needs(s, sh).map((n) => NEED[n.key]);
-    const banner = !inSet ? `<div class="lockbar gray">Этот кадр вне текущего набора<button data-a="addextra" data-id="${sh.id}">Добавить</button></div>`
-      : e === "locked" ? `<div class="lockbar">Нужно: ${esc(need.join(", "))}</div>`
-      : e === "auto" ? `<div class="lockbar gray">Уже открыто — жест снимать не нужно</div>`
-      : app.temp && app.temp.ret ? `<div class="lockbar blue">Разрешили: ${esc(app.temp.label)} · ${Math.min(app.temp.seen.length + 1, app.temp.ids.length)} из ${app.temp.ids.length}<button data-a="tempdone">Готово — к вопросам</button></div>`
-      : app.temp ? `<div class="lockbar blue">Подряд: ${app.temp.seen.length + 1} из ${app.temp.ids.length}<button data-a="tempx">Выйти</button></div>` : "";
-    const bar = e === "locked" ? `<button class="btn b1 go" data-a="access">Дать доступ</button><button class="btn b2" data-a="gotoq">Следующий ›</button>`
-      : e === "done" || e === "auto" || e === "na" ? `<button class="btn pri b1" data-a="gotoq">Дальше ›</button><button class="btn b2" data-a="reset" data-id="${sh.id}">Переснять</button><button class="btn b3" data-a="take" data-id="${sh.id}">Дубль</button>`
-      : `<button class="btn go b1" data-a="done" data-id="${sh.id}">✓ Снял</button><button class="btn yel b2" data-a="skip" data-id="${sh.id}">Потом</button><button class="btn b3" data-a="more">Ещё</button>`;
-    return `<div class="top"><div class="p">Круг ${sh.circle} · ${pos > 0 ? `${pos} из ${circleIds.length}` : "вне круга"}<small>№${esc(sh.id)} · снято ${c.done} из ${c.total}${c.locked ? ` · ждут доступа ${c.locked}` : ""}${sh.part ? " · " + esc(sh.part.replace(" · ", "")) : ""}</small></div>
-        <button class="allbtn" data-a="list">▦ Все кадры</button></div>
-      ${segs(s, circleIds)}
-      <div class="cw" id="cw">${banner}<img class="cd" src="${cardSrc(sh.card)}" alt="${esc(sh.title)}"></div>
-      <div class="bar">${bar}</div>
-      <div class="foot"><button data-a="access">Доступ: ${esc(accessText(s))}</button><button data-a="bug">Ошибка</button><button data-a="home">Домой</button></div>`;
-  },
-  list() {
-    const s = app.cur, ids = L.modeIds(app.data, s), f = app.filter, sel = app.select;
-    const ok = (sh) => { const e = L.effective(s, sh);
-      return f === "all" || (f === "left" && (e === "todo" || e === "skipped")) || (f === "skipped" && e === "skipped") || (f === "done" && e === "done") || (f === "locked" && e === "locked"); };
-    const FL = [["all", "Все"], ["left", "Осталось"], ["skipped", "Потом"], ["done", "Снято"], ["locked", "Ждут доступа"]];
-    const tile = (sh, out) => { const e = out ? "out" : L.effective(s, sh);
-      return `<button class="tile ${e} ${s.cursor === sh.id ? "cur" : ""} ${sel && sel.includes(sh.id) ? "sel" : ""}" data-a="tile" data-id="${sh.id}" ${out ? "" : `data-hold="tile"`}>
-        <img loading="lazy" src="${cardSrc(sh.card, 1)}" alt=""><span class="badge">${out ? "" : BADGE[e] || ""}</span><span class="cap"><span>${sh.id}</span><span>${out ? "не начат" : LABEL[e]}</span></span></button>`; };
-    const groups = [1, 2, 3].map((c) => {
-      const g = ids.map(shotOf).filter((sh) => sh.circle === c && ok(sh)); if (!g.length) return "";
-      const cc = L.counts(app.data, s, c);
-      return `<div class="ghead">Круг ${c} · ${CIRCLE[c]} <span class="mut">снято ${cc.done} из ${cc.total}</span></div><div class="grid">${g.map((sh) => tile(sh)).join("")}</div>`;
-    }).join("");
-    const rest = f === "all" ? app.data.shots.filter((x) => !ids.includes(x.id) && s.shots[x.id].status !== "na") : [];
-    return `<div class="top"><div class="p">Все кадры<small>режим: ${esc(L.modeName(app.data, s.modeId))}${s.circleNow ? ` · сейчас круг ${s.circleNow}` : ""}</small></div>
-        <button class="chip" data-a="modesheet">Режим</button><button class="chip" data-a="${sel ? "selend" : "selbeg"}">${sel ? "Готово" : "Выбрать"}</button></div>
-      <div class="scr"><div class="fil">${FL.map(([k, t]) => `<button class="${f === k ? "on" : ""}" data-a="filter" data-id="${k}">${t}</button>`).join("")}</div>
-      ${sel ? `<div class="small mut">Отметьте кадры и выберите действие внизу.</div>` : `<div class="small mut">Тап — открыть кадр. Долгое нажатие — сменить статус.</div>`}
-      ${f !== "all" && !sel && ids.some((i) => ok(shotOf(i)) && ["todo", "skipped"].includes(L.effective(s, shotOf(i)))) ? `<button class="btn pri" data-a="seq">Снимать эти подряд</button>` : ""}
-      ${groups || `<div class="card mut">Здесь пусто.</div>`}
-      ${rest.length ? `<div class="ghead">Ещё не начато</div><div class="grid">${rest.map((sh) => tile(sh, true)).join("")}</div>` : ""}</div>
-      ${sel ? `<div class="bar"><button class="btn yel b1" data-a="bulk" data-id="skipped">Потом (${sel.length})</button><button class="btn b1" data-a="bulk" data-id="na">Не нужно</button><button class="btn b3" data-a="selend">Отмена</button></div>`
-        : `<div class="bar"><button class="btn pri b1" data-a="gotoq">К съёмке</button><button class="btn b2" data-a="finishall">Завершить</button><button class="btn b3" data-a="home">Домой</button></div>`}`;
-  },
-  stage() {
-    const s = app.cur, c = L.nextStage(app.data, s), prev = s.circleNow, pc = L.counts(app.data, s, prev), n = L.stageIds(app.data, s, c).length;
-    const hint = c === 2 ? "Снаружи: фары, эмблемы, колёса, фонари, VIN через стекло. С доступом — ещё салон, мотор и таблички." : "Салон и жесты: почти всё требует открыть дверь.";
-    return `<div class="scr"><div class="okline">Круг ${prev} готов ✓ <span class="mut">снято ${pc.done}${pc.skipped ? ` · потом ${pc.skipped}` : ""}</span></div>
-      <h2>Дальше: круг ${c}</h2><div class="card"><div class="title">${CIRCLE[c]} · ${n} точек</div><div class="sub">${hint}</div></div>
-      ${accessBlock("stage")}
-      <div class="row"><button class="btn ghost" data-a="list">▦ Все кадры</button><button class="btn ghost" data-a="finishall">Завершить</button></div></div>`;
-  },
-  perms() {
-    const s = app.cur, lk = L.lockedList(app.data, s);
-    return `<div class="scr"><h2>Есть доступ?</h2><div class="card"><div class="title">Ждут доступа: ${lk.length}</div><div class="sub">${lk.map((i) => esc(shotOf(i).title)).slice(0, 6).join(", ")}${lk.length > 6 ? "…" : ""}</div></div>
-      ${accessBlock("perms")}
-      <div class="row"><button class="btn ghost" data-a="list">▦ Все кадры</button><button class="btn ghost" data-a="finishall">Завершить</button></div></div>`;
-  },
-  skipped() {
-    const s = app.cur, sk = L.skippedList(app.data, s).filter((i) => !(s.skipAsk || []).includes(i));
-    const all = L.skippedList(app.data, s);
-    return `<div class="scr"><h2>${s.circleNow ? `Круг ${s.circleNow}: пропущено ${all.length}` : `Пропущено: ${all.length}`}</h2><div class="small mut">Снять их сейчас или оставить на потом? Вопрос задаётся один раз.</div>
-      <div class="rows">${(sk.length ? sk : all).map((i) => rowShot(s, i)).join("")}</div>
-      <button class="btn go" data-a="pass">Снять сейчас (${all.length})</button>
-      <button class="btn" data-a="skipask">Не сейчас, дальше</button>
-      <button class="btn ghost" data-a="giveup">Эти кадры не нужны</button>
-      <button class="btn ghost" data-a="finishall">Завершить съёмку</button></div>`;
-  },
-  summary() {
-    const s = app.cur, c = L.counts(app.data, s), ns = L.notStarted(app.data, s).length;
-    return `<div class="scr"><h2>Итог · ${esc(s.name || "Машина без названия")}</h2>
-      <div class="stat"><div class="g"><b>${c.done}</b>снято</div><div class="y"><b>${c.skipped}</b>потом</div><div class="r"><b>${c.locked}</b>ждут доступа</div><div><b>${ns || c.na + c.auto}</b>${ns ? "не начато" : "не нужно"}</div></div>
-      ${L.hasMore(app.data, s) ? `<button class="btn pri" data-a="resumeshoot">Вернуться к съёмке</button>` : `<div class="okline">Всё снято ✓</div>`}
-      ${c.skipped ? `<button class="btn go" data-a="pass">Снять пропущенное (${c.skipped})</button>` : ""}
-      ${c.locked ? `<button class="btn" data-a="perms">Появился доступ?</button>` : ""}
-      <button class="btn" data-a="qs">Разговор с хозяином (вопросы, ответы)</button>
-      <div class="row"><button class="btn" data-a="copy">Скопировать итог</button><button class="btn" data-a="savefile">Файл</button></div>
-      <div class="row"><button class="btn" data-a="pause">Пауза</button><button class="btn dark" data-a="close">Закрыть съёмку</button></div>
-      <button class="btn ghost" data-a="list">▦ Все кадры</button></div>`;
+  learn() {
+    const r = L.route(app.data, app.rid), i = L.clampIndex(app.data, app.rid, app.learn[app.rid]), p = L.pointAt(app.data, app.rid, i);
+    const n = r.points.length, mk = L.mapIndexOf(app.data, app.rid, i), m = r.maps[mk];
+    return `${seg()}
+      <div class="lq">
+        <button class="lmap" data-a="mapfull" data-id="${mk}" aria-label="Карта во весь экран">${img(m.card, "Карта", mapLabel(r, m), "lthumb", true)}</button>
+        <div class="grow"><div class="lpos">${i + 1} из ${n}${r.maps.length > 1 ? ` · ${esc(m.short)}` : ""}</div><div class="ltag">${esc(pointTag(p))}</div><div class="lqq">Что снимаешь здесь?</div></div>
+      </div>
+      ${app.shown ? `<div class="lans"><b>${esc(p.tag)}</b> · ${esc(p.label)}${p.note ? `<div class="small mut">${esc(p.note)}</div>` : ""}</div>
+        <div class="lcard">${img(p.card, p.tag, p.label)}</div>`
+        : `<button class="btn pri big" data-a="show">Показать</button>`}
+      <div class="lnav"><button class="nav" data-a="lprev" ${i > 0 ? "" : "disabled"} aria-label="Предыдущая">‹</button>
+        <button class="btn ghost restart" data-a="lstart" ${i > 0 ? "" : "disabled"}>С начала</button>
+        <button class="nav" data-a="lnext" ${i < n - 1 ? "" : "disabled"} aria-label="Следующая">›</button></div>`;
   },
   talk() {
-    const s = app.cur, nm = app.settings.myName;
-    const qs = TALK_FLAT.filter((l) => l.q), grants = TALK_FLAT.filter((l) => l.grant);
-    const asked = (l) => !!(s && s.qs[l.id] && (s.qs[l.id].asked || s.qs[l.id].answer));
-    const qDone = qs.filter(asked).length, gDone = grants.filter(asked).length;
-    const secCount = (sec) => { const a = sec.lines.filter((l) => l.q || l.grant); return a.length ? ` ${a.filter(asked).length}/${a.length}` : ""; };
-    const chips = TALK.map((sec) => `<button data-a="talkgo" data-id="${sec.id}">${esc(sec.title)}${secCount(sec)}</button>`).join("");
-    const body = TALK.map((sec) => `<div class="ghead" id="sec-${sec.id}">${esc(sec.title)}${secCount(sec) ? `<span class="mut">${secCount(sec)}</span>` : ""}</div>${sec.tip ? `<div class="small mut">${esc(sec.tip)}</div>` : ""}
-      ${sec.lines.map((l0) => { const l = talkLine(l0, nm), v = (s && s.qs[l.id]) || {}, k = TALK_FLAT.findIndex((x) => x.id === l.id);
-        const num = l.q ? `Вопрос ${qs.findIndex((x) => x.id === l.id) + 1} из ${qs.length}` : l.grant ? `Разрешение ${grants.findIndex((x) => x.id === l.id) + 1} из ${grants.length}` : `Фраза ${k + 1} из ${TALK_FLAT.length}`;
-        const g = l.grant && s ? grantUI(s, l) : "";
-        return `<div class="ph ${l.q ? "q" : ""} ${l.grant ? "grant" : ""} ${asked(l0) ? "asked" : ""}" id="ln-${l.id}"><div class="num"><b class="tag">${esc(l.tag || "")}</b> ${num}${asked(l0) ? " · ✓" : ""}</div><div class="en">${esc(l.en)}</div><div class="ru">${esc(l.ru)}</div>${g}
-          <div class="row" style="margin-top:8px"><button class="btn" style="min-height:48px;margin:0" data-a="owner" data-id="${k}">Показать хозяину</button>
-          ${l.q && s ? `<label class="chk"><input type="checkbox" data-q="${l.id}" data-f="asked" ${v.asked ? "checked" : ""}> спросил</label>` : ""}</div>
-          ${FIELDS[l.id] && s ? `${v.answer ? `<div class="ans">${esc(v.answer)}</div>` : ""}<button class="btn ${v.answer ? "" : "go"}" style="margin:8px 0 0" data-a="ansform" data-id="${l.id}">${v.answer ? "Изменить ответ" : l.id === "v3" ? "Записать контакт" : "Записать ответ"}</button>`
-            : l.q && s ? `<textarea data-q="${l.id}" data-f="answer" rows="2" placeholder="Ответ (можно голосом с клавиатуры)">${esc(v.answer || "")}</textarea>` : ""}</div>`; }).join("")}`).join("");
-    return `<div class="top"><div class="p">Разговор с хозяином<small>${s ? `вопросы ${qDone} из ${qs.length} · разрешения ${gDone} из ${grants.length}` : "читайте с экрана или покажите крупно"}</small></div><button class="chip" data-a="back">Готово</button></div>
-      <div class="fil pad">${chips}</div><div class="scr" id="talkscr">${nm ? "" : `<div class="card small">Совет: впишите своё имя в Настройках — оно появится во фразе знакомства.</div>`}${body}
-      <button class="btn" data-a="back">Назад</button></div>`;
-  },
-  bugs() {
-    return `<div class="scr"><h2>Ошибки и заметки</h2><div class="small mut">То, что вы заметили при проверке. Потом «Подготовить логи», скопировать и прислать.</div>
-      ${app.bugs.length ? app.bugs.slice().reverse().map((b) => `<div class="ph"><div class="small mut">${new Date(b.ts).toLocaleString("ru")} · ${esc(b.screen)}${b.shot ? " · №" + esc(b.shot) : ""}${b.car ? " · " + esc(b.car) : ""}</div><div>${esc(b.text)}</div><button class="btn ghost" style="min-height:44px;margin:8px 0 0" data-a="bugdel" data-id="${b.id}">Удалить</button></div>`).join("") : `<div class="card mut">Пока пусто.</div>`}
-      <button class="btn" data-a="bug">Добавить заметку</button><button class="btn go" data-a="logs">Подготовить логи</button><button class="btn ghost" data-a="back">Назад</button></div>`;
-  },
-  settings() {
-    const st = app.settings;
-    return `<div class="scr"><h2>Настройки</h2><div class="small mut">ТЕМА</div><div class="row">${["auto", "light", "dark"].map((t) => `<button class="btn ${st.theme === t ? "pri" : ""}" style="margin:6px 0" data-a="theme" data-id="${t}">${{ auto: "Авто", light: "Светлая", dark: "Тёмная" }[t]}</button>`).join("")}</div>
-      <div class="small mut" style="margin-top:10px">ВАШЕ ИМЯ ДЛЯ ЗНАКОМСТВА (по-английски)</div><input type="text" id="myname" placeholder="Например: Alex" value="${esc(st.myName || "")}">
-      ${tog("wake", "Экран не гаснет на кадре", st.wake, "set")}${tog("vibrate", "Вибрация", st.vibrate, "set")}
-      <button class="btn" data-a="bugs" style="margin-top:12px">Ошибки и заметки (${app.bugs.length})</button><button class="btn go" data-a="logs">Подготовить логи</button>
-      <button class="btn" data-a="export">Сохранить все данные файлом</button><button class="btn" data-a="refresh">Проверить обновление</button><button class="btn ghost" data-a="replayob">Показать подсказки снова</button>
-      <div class="small mut" style="margin-top:12px">Версия ${esc(app.version)}. Всё хранится в телефоне, без аккаунтов и аналитики. Снимайте с разрешения владельца и будьте внимательны вокруг машин и людей.</div>
-      <button class="btn ghost" data-a="back">Назад</button></div>`;
+    const chips = TALK.map((s) => `<button data-a="talkgo" data-id="${s.id}">${esc(s.title)}</button>`).join("");
+    const body = TALK.map((s) => `<h2 id="sec-${s.id}">${esc(s.title)}</h2>${s.tip ? `<div class="small mut tip">${esc(s.tip)}</div>` : ""}
+      ${s.lines.map((l0) => { const l = talkLine(l0, app.settings.name), k = TALK_FLAT.findIndex((x) => x.id === l0.id);
+        return `<button class="phr" data-a="phrase" data-i="${k}"><span class="ptag">${esc(l.tag)}</span><span class="en">${esc(l.en)}</span><span class="ru">${esc(l.ru)}</span></button>`; }).join("")}`).join("");
+    return `<div class="chips">${chips}</div><div class="small mut tip">Тап по фразе — крупно, чтобы показать хозяину.</div>${body}`;
   },
 };
 
-function sheets() {
-  const s = app.cur;
-  if (app.sheet === "more") { const sh = shotOf(s.cursor);
-    return sheet(`<h2>№${sh.id} ${esc(sh.title)}</h2><button class="btn" data-a="na" data-id="${sh.id}">Этот кадр не нужен</button><button class="btn" data-a="take" data-id="${sh.id}">Снял ещё дубль</button>
-      <button class="btn" data-a="note">Заметка${s.shots[sh.id].note ? ": " + esc(s.shots[sh.id].note) : ""}</button><button class="btn" data-a="access">Доступ и «хозяин уже открыл»</button>
-      <button class="btn" data-a="talk" data-id="hello">Разговор с хозяином</button><button class="btn" data-a="undo">Отменить последнее</button><button class="btn" data-a="bug">Заметил ошибку</button>
-      <button class="btn ghost" data-a="finishall">Завершить съёмку</button><button class="btn ghost" data-a="closesheet">Закрыть</button>`); }
-  if (app.sheet && app.sheet.t === "ans") { const id = app.sheet.id, l = TALK_FLAT.find((x) => x.id === id), fs = FIELDS[id], v = app.sheet.draft;
-    const lab = (f) => f.en ? `${f.en} · <i>${f.ru}</i>` : esc(f.ru);
-    const field = (f) => f.type === "choice"
-      ? `<div class="fl"><span>${lab(f)}</span><div class="opts">${f.opts.map((o) => `<button class="${v[f.k] === o ? "on" : ""}" data-a="ansopt" data-id="${f.k}" data-v="${esc(o)}">${esc(o)}</button>`).join("")}</div></div>`
-      : f.type === "area" ? `<label class="fl"><span>${lab(f)}</span><textarea data-fk="${f.k}" rows="2" placeholder="${esc(f.ph || "")}">${esc(v[f.k] || "")}</textarea></label>`
-      : `<label class="fl"><span>${lab(f)}</span><input data-fk="${f.k}" type="${f.type === "tel" ? "tel" : f.type === "email" ? "email" : "text"}" ${["num", "money"].includes(f.type) ? 'inputmode="numeric"' : ""} value="${esc(v[f.k] || "")}" placeholder="${esc(f.ph || "")}" autocomplete="off"></label>`;
-    const qn = TALK_FLAT.filter((x) => x.q), qi = qn.findIndex((x) => x.id === id) + 1;
-    return sheet(`<div class="num"><b class="tag">${esc(l.tag)}</b> Вопрос ${qi} из ${qn.length}${id === "v3" ? " · Contact" : ""}</div><h2 style="font-size:19px">${esc(l.ru)}</h2>
-      ${id === "v3" ? `<div class="small mut">Можно дать телефон хозяину — подписи по-английски. Хранится только в этом телефоне.</div>` : ""}
-      ${fs.map(field).join("")}<label class="fl"><span>Ещё заметка</span><textarea data-fk="_note" rows="2">${esc(v._note || "")}</textarea></label>
-      <button class="btn go" data-a="anssave" data-id="${id}">Сохранить</button><button class="btn ghost" data-a="closesheet">Отмена</button>`); }
-  if (app.sheet === "bug") return sheet(`<h2>Заметил ошибку</h2><div class="small mut">Что не так? Сохранится вместе с экраном и кадром.</div><textarea id="bugtxt" rows="5" placeholder="Например: кнопка «Снял» не нажимается на кадре 7"></textarea><button class="btn go" data-a="bugsave">Сохранить</button><button class="btn ghost" data-a="closesheet">Отмена</button>`);
-  if (app.sheet && app.sheet.t === "logs") return sheet(`<h2>Логи</h2><div class="small mut">Скопируйте и пришлите мне.</div><textarea id="logtxt" rows="12" readonly style="font-size:12px">${esc(app.sheet.text)}</textarea><button class="btn go" data-a="logcopy">Скопировать</button><button class="btn" data-a="logfile">Сохранить файл</button><button class="btn ghost" data-a="closesheet">Закрыть</button>`);
-  if (app.sheet === "access") return sheet(`<h2>Доступ</h2><div class="small mut">Что разрешил хозяин. Можно менять в любой момент, снятое не пропадёт.</div>${PERMS.map(([k, t]) => tog(k, t, s.perms[k], "perm")).join("")}
-      <div class="small mut" style="margin-top:10px">УЖЕ ОТКРЫТО (САМ ХОЗЯИН)</div>${tog("doorOpen", "Дверь открыта", s.states.doorOpen, "state")}${tog("hoodOpen", "Капот открыт", s.states.hoodOpen, "state")}
-      <button class="btn" data-a="allaccess" style="margin-top:8px">Своя машина: всё разрешено</button><button class="btn go" data-a="closesheet">Готово</button>`);
-  if (app.sheet === "modes") return sheet(`<h2>Режим</h2><div class="small mut">Меняет только набор кадров. Снятое и доступ остаются.</div><div class="modes">${app.data.modes.map((m) => modeTile(m, s.modeId === m.id, "setmode")).join("")}</div><button class="btn ghost" data-a="closesheet">Закрыть</button>`);
-  if (app.sheet && app.sheet.t === "tile") { const sh = shotOf(app.sheet.id), inSet = L.modeIds(app.data, s).includes(sh.id);
-    return sheet(`<h2>№${sh.id} ${esc(sh.title)}</h2><div class="small mut">Сейчас: ${LABEL[L.effective(s, sh)] || "не снято"}</div>
-      <button class="btn go" data-a="tset" data-id="done">Снято</button><button class="btn yel" data-a="tset" data-id="skipped">Потом</button><button class="btn" data-a="tset" data-id="na">Не нужно</button><button class="btn" data-a="tset" data-id="todo">Вернуть в очередь</button>
-      ${inSet ? "" : `<button class="btn" data-a="tset" data-id="extra">Добавить в съёмку</button>`}<button class="btn ghost" data-a="closesheet">Закрыть</button>`); }
-  if (app.sheet && app.sheet.t === "sess") return sheet(`<h2>${esc(app.sheet.name || "Машина без названия")}</h2><button class="btn" data-a="rename" data-id="${app.sheet.id}">Переименовать</button><button class="btn" data-a="sclose" data-id="${app.sheet.id}">Закрыть съёмку</button><button class="btn danger" data-a="sdel" data-id="${app.sheet.id}">Удалить</button><button class="btn ghost" data-a="closesheet">Отмена</button>`);
-  return "";
+function viewerHTML() {
+  const v = app.viewer;
+  if (v.rid) {
+    const p = L.pointAt(app.data, v.rid, v.i), n = L.points(app.data, v.rid).length;
+    return `<div class="vw" role="dialog" aria-label="Карточка"><div class="vtop"><button class="ib" data-a="vclose" aria-label="Закрыть">✕</button>
+        <div class="vpos"><b>${esc(L.position(app.data, v.rid, v.i))}</b><small>${esc(p.label)}</small></div></div>
+      <div class="vbody">${img(p.card, p.tag, p.label)}${p.note ? `<div class="vnote">${esc(p.note)}</div>` : ""}</div>
+      <div class="vbar"><button class="nav" data-a="vprev" ${v.i > 0 ? "" : "disabled"} aria-label="Предыдущая">‹</button>
+        <span class="vhint">свайп ← →</span><button class="nav" data-a="vnext" ${v.i < n - 1 ? "" : "disabled"} aria-label="Следующая">›</button></div></div>`;
+  }
+  return `<div class="vw" role="dialog" aria-label="${esc(v.label)}"><div class="vtop"><button class="ib" data-a="vclose" aria-label="Закрыть">✕</button>
+      <div class="vpos"><b>${esc(v.label)}</b>${v.note ? `<small>${esc(v.note)}</small>` : ""}</div></div>
+    <div class="vbody">${img(v.card, v.tag, v.label)}</div></div>`;
+}
+function phraseHTML() {
+  const k = app.phrase, l = talkLine(TALK_FLAT[k], app.settings.name);
+  return `<div class="owner" role="dialog"><div class="onum">${esc(l.tag)} · ${k + 1} из ${TALK_FLAT.length}</div><div class="en">${esc(l.en)}</div><div class="ru">${esc(l.ru)}</div>
+    <div class="ownerbar"><button data-a="php" ${k ? "" : "disabled"} aria-label="Предыдущая">‹</button><button data-a="phx">Закрыть</button><button data-a="phn" ${k < TALK_FLAT.length - 1 ? "" : "disabled"} aria-label="Следующая">›</button></div></div>`;
+}
+const offText = () => (app.pre.ready ? "Работает без интернета ✓" : app.pre.n ? `Загрузка для офлайна ${app.pre.n}/${app.pre.total}` : "Офлайн-кэш готовится");
+function showOffline() { const el = $("#offst"); if (el) el.textContent = offText(); }   // без перерисовки: не сбивать ввод имени
+function settingsHTML() {
+  const st = app.settings;
+  return `<div class="sheet-bg" data-a="bg"><div class="sheet" role="dialog" aria-label="Настройки"><div class="row"><h2 class="grow">Настройки</h2><button class="ib" data-a="setx" aria-label="Закрыть">✕</button></div>
+    <div class="lbl">Тема</div><div class="seg">${["auto", "light", "dark"].map((t) => `<button class="${st.theme === t ? "on" : ""}" data-a="theme" data-id="${t}">${{ auto: "Авто", light: "Светлая", dark: "Тёмная" }[t]}</button>`).join("")}</div>
+    <label class="lbl" for="myname">Имя для знакомства (по-английски)</label><input type="text" id="myname" autocomplete="off" placeholder="${DEFAULT_NAME}" value="${esc(st.name)}">
+    <div class="small mut">Во фразе: «My name is ${esc(st.name || DEFAULT_NAME)}.»</div>
+    ${app.update ? `<button class="btn yel" data-a="update">Есть обновление: применить</button>` : ""}
+    <button class="btn" data-a="refresh">${app.checking ? "Проверяю…" : "Обновить"}</button>
+    <div class="small mut" id="offst">${esc(offText())}</div>
+    <div class="small mut ver">Three Laps ${VERSION}${app.build ? ` · сборка ${esc(app.build)}` : ""}</div></div></div>`;
 }
 
 function render() {
-  document.documentElement.dataset.theme = theme();
-  if (app.cur && ["frame", "map"].includes(app.screen) && !app.cur.cursor) app.screen = L.endState(app.data, app.cur) || "summary";
-  if (app.screen === "stage" && !L.nextStage(app.data, app.cur)) app.screen = L.endState(app.data, app.cur) || "summary";
-  if (["perms", "stage"].includes(app.screen) && app.cur && app.lastScr !== app.screen) { app.draft = { perms: { ...app.cur.perms }, states: { ...app.cur.states } }; app.exact = false; }
-  app.lastScr = app.screen;
-  const v = view[app.screen] || view.home;
-  const sc = $(".scr"), keep = sc ? sc.scrollTop : 0, same = root.dataset.scr === app.screen;
-  root.dataset.scr = app.screen;
-  root.innerHTML = v() + sheets()
-    + (app.toast ? `<div class="toast ${["frame", "map", "pre"].includes(app.screen) ? "" : "top"}"><span>${esc(app.toast.msg)}</span>${app.toast.label ? `<button data-a="toast">${esc(app.toast.label)}</button>` : ""}</div>` : "")
-    + (app.owner !== null ? (() => { const l = talkLine(TALK_FLAT[app.owner], app.settings.myName); return `<div class="owner"><div class="onum">${esc(TALK_FLAT[app.owner].tag)} · ${TALK_FLAT[app.owner].q ? `Вопрос ${TALK_FLAT.filter((x) => x.q).indexOf(TALK_FLAT[app.owner]) + 1} из ${TALK_FLAT.filter((x) => x.q).length}` : `Фраза ${app.owner + 1} из ${TALK_FLAT.length}`}</div><div class="en">${esc(l.en)}</div><div class="ru">${esc(l.ru)}</div>
-      <div class="ownerbar"><button data-a="ownerp" ${app.owner ? "" : "disabled"}>‹</button><button data-a="ownerx">Закрыть</button><button data-a="ownern" ${app.owner < TALK_FLAT.length - 1 ? "" : "disabled"}>›</button></div></div>`; })() : "");
-  if (same) { const n = $(".scr"); if (n) n.scrollTop = keep; }
-  if (app.screen === "frame") { wake(); const cw = $("#cw"); if (cw) swipe(cw); } else unwake();
-  const nm = $("#nm"); if (nm) nm.oninput = () => (app.newDraft.name = nm.value);
-  const ph = $("#ph"); if (ph) ph.onchange = () => photo(ph.files[0]);
-  root.querySelectorAll("[data-q]").forEach((el) => (el.onchange = () => { const v2 = el.dataset.f === "asked" ? { asked: el.checked } : { answer: el.value, asked: true }; doAct({ type: "answer", q: el.dataset.q, v: v2 }); }));
-  const mn = $("#myname"); if (mn) mn.onchange = () => { app.settings.myName = mn.value.trim(); S.setKV("settings", app.settings); };
-  if (app.screen === "talk" && app.talkSec) { const el = document.getElementById(app.talkSec.startsWith("ln-") ? app.talkSec : "sec-" + app.talkSec); app.talkSec = null; if (el) el.scrollIntoView({ block: "start" }); }
+  const th = theme();
+  document.documentElement.dataset.theme = th;
+  const meta = $('meta[name="theme-color"]'); if (meta) meta.content = th === "dark" ? "#0f1013" : "#ffffff";
+  const sc = $(".scr"), keep = sc && root.dataset.tab === app.tab ? sc.scrollTop : 0;
+  root.dataset.tab = app.tab;
+  root.innerHTML = `<header class="hdr"><div class="brand">Three Laps</div>
+      ${app.update ? `<button class="updpill" data-a="update">Обновить</button>` : ""}
+      <button class="ib" data-a="settings" aria-label="Настройки">${ICON.gear}</button></header>
+    <main class="scr" id="scr">${view[app.tab]()}</main>
+    <nav class="tabs">${TABS.map(([k, t]) => `<button class="${app.tab === k ? "on" : ""}" data-a="tab" data-id="${k}" aria-current="${app.tab === k ? "page" : "false"}">${ICON[k]}<span>${t}</span></button>`).join("")}</nav>
+    ${app.viewer ? viewerHTML() : ""}${app.phrase !== null ? phraseHTML() : ""}${app.settingsOpen ? settingsHTML() : ""}`;
+  const n = $(".scr"); if (n && keep) n.scrollTop = keep;
+  if (app.viewer) swipe($(".vbody")); else if (app.tab === "learn") swipe($(".scr"));   // Учить: свайп по всему экрану
+  const mn = $("#myname");
+  if (mn) mn.oninput = () => { app.settings.name = mn.value.trim(); S.set("settings", app.settings); const hint = mn.nextElementSibling; if (hint) hint.textContent = `Во фразе: «My name is ${app.settings.name || DEFAULT_NAME}.»`; };
 }
 
-// ---------- события ----------
-let hold = null, held = false;
-root.addEventListener("pointerdown", (e) => { const t = e.target.closest("[data-hold]"); held = false; if (!t) return; hold = setTimeout(() => { held = true; buzz(25); app.sheet = { t: "tile", id: t.dataset.id }; render(); }, 550); });
-["pointerup", "pointercancel", "pointermove", "scroll"].forEach((ev) => root.addEventListener(ev, () => clearTimeout(hold), true));
-root.addEventListener("click", async (e) => {
-  const t = e.target.closest("[data-a]"); if (!t) return; if (held) { held = false; return; }
-  const a = t.dataset.a, id = t.dataset.id; if (a === "nop") return;
-  if (a === "bg") { if (e.target === t) { app.sheet = null; render(); } return; }
-  try { await handle(a, id, t); } catch (err) { logErr(`${a}: ${err && err.message}`); showToast("Что-то пошло не так — записано в логи", "", null, 3000); }
-});
-async function handle(a, id, t) {
-  const s = app.cur;
+// заглушка вместо отсутствующей карточки (карточки могут прийти позже)
+root.addEventListener("error", (e) => {
+  const t = e.target;
+  if (!(t instanceof HTMLImageElement) || !t.dataset.label) return;
+  missing.add(t.getAttribute("src"));
+  t.outerHTML = placeholder(t.className, t.dataset.tag, t.dataset.label);
+}, true);
+
+// ---------- навигация и «Назад» ----------
+const overlayOpen = () => app.viewer || app.phrase !== null || app.settingsOpen;
+function openOverlay(fn) { const was = overlayOpen(); fn(); if (!was) history.pushState({ o: 1 }, ""); render(); }
+function closeTop() {
+  if (app.phrase !== null) app.phrase = null; else if (app.viewer) app.viewer = null; else if (app.settingsOpen) app.settingsOpen = false;
+}
+function closeOverlay() {
+  closeTop(); render();
+  if (!overlayOpen() && history.state && history.state.o) history.back();   // убрать запись истории оверлея; popstate уже ничего не закроет
+}
+// системная «Назад» закрывает открытый оверлей (карточка, фраза, настройки), а не приложение
+addEventListener("popstate", () => { if (overlayOpen()) { app.phrase = null; app.viewer = null; app.settingsOpen = false; render(); } });
+
+function moveViewer(dir) {
+  const v = app.viewer; if (!v || !v.rid) return;
+  const j = L.step(app.data, v.rid, v.i, dir); if (j === null) return;
+  v.i = j; render();
+}
+function moveLearn(dir) {
+  const i = L.clampIndex(app.data, app.rid, app.learn[app.rid]), j = L.step(app.data, app.rid, i, dir);
+  if (j === null) return;
+  app.learn[app.rid] = j; app.shown = false; S.set("learn", app.learn); render();
+  const s = $(".scr"); if (s) s.scrollTop = 0;
+}
+
+root.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-a]"); if (!t) return;
+  const a = t.dataset.a, id = t.dataset.id;
   switch (a) {
-    case "home": app.stack = []; app.temp = null; app.sheet = null; if (s && s.status === "active") await commit({ ...s, status: "paused" }); app.cur = null; app.screen = "home"; remember(); render(); history.pushState({}, ""); break;
-    case "settings": go("settings"); break;
-    case "back": back(); break;
-    case "update": app.updating = true; navigator.serviceWorker.getRegistration().then((r) => { if (r && r.waiting) r.waiting.postMessage("skipWaiting"); }); break;
-    case "refresh": await forceUpdate(); break;
-    case "theme": app.settings.theme = id; await S.setKV("settings", app.settings); render(); break;
-    case "tog": toggle(t.dataset.g, id); break;
-    case "replayob": app.ob = 0; app.screen = "onboard"; render(); break;
-    case "ob-next": app.ob = (app.ob || 0) + 1; if (app.ob >= ONBOARD.length) { app.settings.onboarded = true; S.setKV("settings", app.settings); app.screen = "home"; } render(); break;
-    case "ob-skip": app.settings.onboarded = true; S.setKV("settings", app.settings); app.screen = "home"; render(); break;
-    case "new": app.newDraft = { name: "", icon: nextIcon(-1), photo: null, modeId: "first", exact: false, perms: { touch: false, door: false, hood: false, engine: false } }; go("new"); break;
-    case "icon": app.newDraft.icon = nextIcon(app.newDraft.icon); app.newDraft.photo = null; render(); break;
-    case "mode": app.newDraft.modeId = id; render(); break;
-    case "dexact": app.newDraft.exact = !app.newDraft.exact; render(); break;
-    case "start": { const d = app.newDraft; const m = L.modeInfo(app.data, d.modeId);
-      const ns = L.newSession(app.data, { name: d.name.trim(), icon: d.icon, perms: m.kind === "fixed" ? d.perms : null, modeId: d.modeId }); ns.photo = d.photo;
-      await commit(ns); app.stack = []; app.screen = "home"; go("pre"); remember(); break; }
-    case "open": { const x = app.sessions.find((q) => q.id === id); if (!x) break;
-      app.cur = { ...x, status: "active" }; if (x.status === "closed") app.cur = L.act(app.data, app.cur, { type: "resume" });
-      await commit(app.cur); app.stack = ["home"];
-      if (!app.cur.preSeen) { app.screen = "pre"; render(); } else toNext(); history.pushState({}, ""); break; }
-    case "sessmenu": { const x = app.sessions.find((q) => q.id === id); app.sheet = { t: "sess", id: x.id, name: x.name }; render(); break; }
-    case "pre-ok": await doAct({ type: "preSeen" }); toNext(); break;
-    case "map-ok": await doAct({ type: "mapSeen", circle: shotOf(app.cur.cursor).circle }); app.screen = "frame"; render(); break;
-    case "done": if (app.hold) break; app.hold = true; setTimeout(() => { app.hold = false; }, 900); buzz(); await shotAction("done", id); break;
-    case "skip": buzz(); await shotAction("skip", id); break;
-    case "na": app.sheet = null; await shotAction("na", id); break;
-    case "take": app.sheet = null; await doAct({ type: "take", id }, { toast: "Дубль записан" }); render(); break;
-    case "reset": await doAct({ type: "reset", id }, { toast: "Вернули в очередь" }); render(); break;
-    case "more": app.sheet = "more"; render(); break;
-    case "closesheet": app.sheet = null; render(); break;
-    case "note": { const sh = shotOf(s.cursor); const v = prompt("Заметка к кадру", s.shots[sh.id].note || ""); app.sheet = null; if (v !== null) await doAct({ type: "note", id: sh.id, text: v }); render(); break; }
-    case "undo": app.sheet = null; await doUndo(); break;
-    case "access": app.sheet = "access"; render(); break;
-    case "allaccess": for (const k of L.PERMS) await doAct({ type: "setPerm", key: k, value: true }); render(); break;
-    case "addextra": await doAct({ type: "addExtra", id }, { toast: "Добавлено в съёмку" }); render(); break;
-    case "gotoq": { app.temp = null; const q = L.nextAfter(app.data, { ...s }, s.cursor) || L.queue(app.data, s)[0];
-      if (q) jump(q); else { app.cur = { ...s, cursor: null }; toNext(); } break; }
-    case "tempx": app.temp = null; render(); break;
-    case "tempdone": { const t0 = app.temp; app.temp = null; if (t0 && t0.ret) { app.screen = "talk"; app.talkSec = t0.ret; } render(); break; }
-    case "grant": await startGrant(id, false); break;
-    case "grantself": await startGrant(id, true); break;
-    case "grantgo": await startGrant(id, false); break;
-    case "contact": case "ansform": { const q = (s && s.qs[id]) || {}; app.sheet = { t: "ans", id, draft: { ...(q.fields || q.contact || {}) } }; render(); break; }
-    case "ansopt": { syncAns(); const d = app.sheet.draft; d[id] = d[id] === t.dataset.v ? "" : t.dataset.v; render(); break; }
-    case "anssave": { syncAns(); const fs = FIELDS[id], d = app.sheet.draft;
-      const money = (x) => (x && /^\d[\d\s.,]*$/.test(x) ? "$" + x.replace(/[^\d]/g, "").replace(/\B(?=(\d{3})+(?!\d))/g, " ") : x);
-      const lines = [...fs.map((f) => [(f.ru[0].toUpperCase() + f.ru.slice(1)).replace(/,? ?\$$/, ""), f.type === "money" ? money(d[f.k]) : d[f.k]]), ["Заметка", d._note]].filter(([, x]) => x).map(([a2, x]) => `${a2}: ${x}`);
-      app.sheet = null; await doAct({ type: "answer", q: id, v: { asked: true, fields: d, answer: lines.join("\n") } });
-      showToast(lines.length ? "Ответ сохранён" : "Пусто — ничего не записано", "", null, 2000); break; }
-    case "deny": await doAct({ type: "answer", q: id, v: { asked: true, answer: "нет" } }); app.talkSec = nextLineAnchor(id); render(); break;
-    case "list": app.select = null; go("list"); break;
-    case "filter": app.filter = id; render(); break;
-    case "tile": if (app.select) { const i = app.select.indexOf(id); if (i >= 0) app.select.splice(i, 1); else app.select.push(id); render(); } else jump(id); break;
-    case "selbeg": app.select = []; render(); break;
-    case "selend": app.select = null; render(); break;
-    case "bulk": { const ids = app.select.slice(); app.select = null; if (ids.length) await doAct({ type: "bulk", ids, to: id }, { toast: "Готово" }); render(); break; }
-    case "seq": { const f = app.filter; const ids = L.modeIds(app.data, s).filter((i) => { const e = L.effective(s, shotOf(i)); return ["todo", "skipped"].includes(e) && (f === "all" || f === "left" || (f === "skipped" && e === "skipped")); });
-      if (!ids.length) break; app.temp = { ids, seen: [], back: s.cursor, from: null }; jump(ids[0]); break; }
-    case "modesheet": app.sheet = "modes"; render(); break;
-    case "setmode": app.sheet = null; await doAct({ type: "setMode", modeId: id }, { toast: "Режим сменён" }); render(); break;
-    case "tset": { const sh = app.sheet.id; app.sheet = null;
-      if (id === "extra") await doAct({ type: "addExtra", id: sh }); else if (id === "todo") await doAct({ type: "reset", id: sh }); else await doAct({ type: id === "done" ? "done" : id === "skipped" ? "skip" : "na", id: sh });
-      app.cur = { ...app.cur, cursor: s.cursor }; render(); break; }
-    case "exact": app.exact = !app.exact; render(); break;
-    case "acc": {   // ответ на «Есть доступ?» (data-k: stage | perms)
-      const kind = t.dataset.k, d = app.draft;
-      const perms = id === "exact" ? { ...d.perms } : { touch: false, door: false, hood: false, ...ACCESS[id].perms, engine: d.perms.engine };
-      const states = id === "exact" ? { ...d.states } : {};
-      if (kind === "stage") await doAct({ type: "addStage", circle: L.nextStage(app.data, app.cur), perms, states });
-      else await doAct({ type: "applyAccess", perms, states, answered: true });
-      app.stack = []; toNext(); break; }
-    case "skipask": await doAct({ type: "skipAsked" }); toNext(); break;
-    case "pass": await doAct({ type: "enterPass" }); toNext(); break;
-    case "giveup": await doAct({ type: "giveUp" }, { toast: "Убрали из съёмки" }); toNext(); break;
-    case "finishall": app.sheet = null; app.temp = null; await doAct({ type: "finishAll" }); app.screen = "summary"; render(); break;
-    case "resumeshoot": await doAct({ type: "resume" }); toNext(); break;
-    case "perms": go("perms"); break;
-    case "phrases": app.sheet = null; app.talkSec = "access"; go("talk"); break;
-    case "talk": app.sheet = null; app.talkSec = id || "hello"; go("talk"); break;
+    case "tab": app.tab = id; app.shown = false; S.set("tab", id); render(); $(".scr").scrollTop = 0; break;
+    case "rid": app.rid = id; app.shown = false; S.set("rid", id); render(); break;
+    case "open": openOverlay(() => { app.viewer = { rid: app.rid, i: +t.dataset.i }; }); break;
+    case "mapk": app.mapk = +id; S.set("mapk", app.mapk); render(); break;
+    case "mapfull": { const r = L.route(app.data, app.rid), m = r.maps[+id || 0] || r.maps[0]; openOverlay(() => { app.viewer = { card: m.card, tag: "Карта", label: mapLabel(r, m) }; }); break; }
+    case "pre": { const p = app.data.pre; openOverlay(() => { app.viewer = { card: p.card, tag: p.tag, label: p.label, note: p.note }; }); break; }
+    case "vclose": case "phx": case "setx": closeOverlay(); break;
+    case "bg": if (e.target === t) closeOverlay(); break;
+    case "vprev": moveViewer(-1); break;
+    case "vnext": moveViewer(1); break;
+    case "show": app.shown = true; render(); break;
+    case "lprev": moveLearn(-1); break;
+    case "lnext": moveLearn(1); break;
+    case "lstart": app.learn[app.rid] = 0; app.shown = false; S.set("learn", app.learn); render(); break;
     case "talkgo": { const el = document.getElementById("sec-" + id); if (el) el.scrollIntoView({ block: "start", behavior: "smooth" }); break; }
-    case "owner": app.owner = +id; render(); history.pushState({}, ""); break;
-    case "ownerp": app.owner = Math.max(0, app.owner - 1); render(); break;
-    case "ownern": app.owner = Math.min(TALK_FLAT.length - 1, app.owner + 1); render(); break;
-    case "ownerx": app.owner = null; render(); break;
-    case "qs": app.talkSec = "car"; go("talk"); break;
-    case "pause": await doAct({ type: "setStatus", value: "paused" }); await handle("home"); break;
-    case "close": await doAct({ type: "setStatus", value: "closed" }); await handle("home"); break;
-    case "copy": { const txt = fullSummary(s); try { await navigator.clipboard.writeText(txt); showToast("Итог скопирован", "", null, 2500); } catch { prompt("Скопируйте итог", txt); } break; }
-    case "savefile": download(`three-laps-${(s.name || "car").replace(/[^\wа-яё]+/gi, "_")}.txt`, fullSummary(s)); break;
-    case "export": download("three-laps-backup.json", JSON.stringify(app.sessions)); break;
-    case "rename": { const x = app.sessions.find((q) => q.id === id); const v = prompt("Название", x.name || ""); app.sheet = null; if (v !== null) await commit({ ...x, name: v.trim() }); app.cur = null; render(); break; }
-    case "sclose": { const x = app.sessions.find((q) => q.id === id); app.sheet = null; await commit({ ...x, status: "closed" }); app.cur = null; render(); break; }
-    case "sdel": { if (confirm("Удалить съёмку? Вернуть будет нельзя.")) { await S.deleteSession(id); app.sessions = app.sessions.filter((q) => q.id !== id); } app.sheet = null; app.cur = null; render(); break; }
-    case "bug": app.sheet = "bug"; render(); setTimeout(() => { const x = $("#bugtxt"); if (x) x.focus(); }, 80); break;
-    case "bugsave": { const txt = ($("#bugtxt") || {}).value || ""; if (!txt.trim()) break;
-      app.bugs.push({ id: "b" + Date.now().toString(36), ts: Date.now(), screen: app.screen, shot: app.cur && app.cur.cursor, car: app.cur && app.cur.name, text: txt.trim() });
-      await S.setKV("bugs", app.bugs); app.sheet = null; showToast("Заметка сохранена", "", null, 2500); break; }
-    case "bugdel": app.bugs = app.bugs.filter((b) => b.id !== id); await S.setKV("bugs", app.bugs); render(); break;
-    case "bugs": go("bugs"); break;
-    case "logs": app.sheet = { t: "logs", text: await buildLogs() }; render(); break;
-    case "logcopy": { const x = $("#logtxt"); try { await navigator.clipboard.writeText(app.sheet.text); } catch { x.select(); document.execCommand("copy"); } showToast("Скопировано", "", null, 2000); break; }
-    case "logfile": download("three-laps-logs.txt", app.sheet.text); break;
-    case "toast": { const f = app.toast && app.toast.fn; clearToast(); if (f) f(); break; }
+    case "phrase": openOverlay(() => { app.phrase = +t.dataset.i; }); break;
+    case "php": app.phrase = Math.max(0, app.phrase - 1); render(); break;
+    case "phn": app.phrase = Math.min(TALK_FLAT.length - 1, app.phrase + 1); render(); break;
+    case "settings": openOverlay(() => { app.settingsOpen = true; }); break;
+    case "theme": app.settings.theme = id; S.set("settings", app.settings); render(); break;
+    case "refresh": forceUpdate(); break;
+    case "update": app.updating = true; navigator.serviceWorker.getRegistration().then((r) => { if (r && r.waiting) r.waiting.postMessage("skipWaiting"); else location.reload(); }); break;
   }
+});
+addEventListener("keydown", (e) => {
+  if (e.target.closest && e.target.closest("input")) return;
+  const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+  if (e.key === "Escape" && overlayOpen()) return closeOverlay();
+  if (!d) return;
+  if (app.phrase !== null) { app.phrase = Math.min(TALK_FLAT.length - 1, Math.max(0, app.phrase + d)); render(); }
+  else if (app.viewer) moveViewer(d);
+  else if (app.tab === "learn" && !app.settingsOpen) moveLearn(d);
+});
+
+// свайп влево/вправо (палец или мышь); вертикальная прокрутка остаётся за браузером (touch-action: pan-y)
+function swipe(el) {
+  let x0 = null, y0 = 0;
+  el.onpointerdown = (e) => { x0 = e.clientX; y0 = e.clientY; };
+  el.onpointercancel = () => { x0 = null; };
+  el.onpointerup = (e) => {
+    if (x0 === null) return;
+    const dx = e.clientX - x0, dy = e.clientY - y0; x0 = null;
+    if (Math.abs(dx) < 50 || Math.abs(dy) > Math.abs(dx) * 0.7) return;
+    const dir = dx < 0 ? 1 : -1;
+    if (app.viewer) moveViewer(dir); else if (app.tab === "learn") moveLearn(dir);
+  };
 }
-function fullSummary(s) {   // итог + ответы хозяина (вопрос по-русски)
-  const qa = TALK_FLAT.filter((l) => l.q && s.qs[l.id] && (s.qs[l.id].asked || s.qs[l.id].answer));
-  return L.summaryText(app.data, { ...s, qs: {} }) + (qa.length ? "\n\nРазговор с хозяином:\n" + qa.map((l) => `• ${l.tag}: ${(s.qs[l.id].answer || "(спросил, ответ не записан)").replace(/\n/g, "; ")}`).join("\n") : "");
-}
-function syncAns() {   // перенести введённое в черновик перед перерисовкой листа
-  if (!app.sheet || app.sheet.t !== "ans") return;
-  root.querySelectorAll("[data-fk]").forEach((el) => { app.sheet.draft[el.dataset.fk] = el.value.trim(); });
+
+// ---------- обновление и офлайн ----------
+function toast(msg) {
+  const d = document.createElement("div"); d.className = "toast"; d.textContent = msg; document.body.appendChild(d);
+  setTimeout(() => d.remove(), 2600);
 }
 async function forceUpdate() {
   if (!("serviceWorker" in navigator)) { location.reload(); return; }
@@ -508,85 +226,42 @@ async function forceUpdate() {
     if (!r) { location.reload(); return; }
     await r.update();
     const t0 = Date.now();
-    while (r.installing && Date.now() - t0 < 60000) await new Promise((z) => setTimeout(z, 500));   // докачать новую версию (≈10 МБ)
+    while (r.installing && Date.now() - t0 < 60000) await new Promise((z) => setTimeout(z, 500));   // докачать новую версию
     if (r.waiting) { app.updating = true; r.waiting.postMessage("skipWaiting"); setTimeout(() => location.reload(), 4000); return; }
-    showToast(`Уже последняя версия (${app.version})`, "", null, 2500);
-  } catch (e) { logErr("update: " + e.message); showToast("Нет связи — обновлю, когда появится интернет", "", null, 3000); }
+    toast(`Уже последняя версия (${VERSION})`);
+  } catch { toast("Нет связи — обновлю, когда появится интернет"); }
   app.checking = false; render();
 }
-function toggle(g, k) {
-  if (g === "dperm") { app.newDraft.perms[k] = !app.newDraft.perms[k]; render(); }
-  else if (g === "pdraft") { app.draft.perms[k] = !app.draft.perms[k]; render(); }
-  else if (g === "sdraft") { app.draft.states[k] = !app.draft.states[k]; render(); }
-  else if (g === "perm") doAct({ type: "setPerm", key: k, value: !app.cur.perms[k] }).then(render);
-  else if (g === "state") doAct({ type: "setState", key: k, value: !app.cur.states[k] }).then(render);
-  else if (g === "set") { app.settings[k] = !app.settings[k]; S.setKV("settings", app.settings); render(); }
-}
-async function buildLogs() {
-  let persisted = "?"; try { persisted = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted() : "n/a"; } catch { /* */ }
-  const o = [`Three Laps · логи · ${new Date().toLocaleString("ru")}`, `версия: ${app.version}`, `экран: ${app.screen} · окно ${innerWidth}×${innerHeight} · тема ${theme()} · офлайн готов: ${app.pre.ready} · хранилище постоянное: ${persisted}`, `устройство: ${navigator.userAgent}`, ""];
-  o.push(`ЗАМЕТКИ (${app.bugs.length}):`);
-  for (const b of app.bugs) o.push(`- ${new Date(b.ts).toLocaleString("ru")} · ${b.screen}${b.shot ? " · №" + b.shot : ""}${b.car ? " · " + b.car : ""}: ${b.text}`);
-  o.push("", `ОШИБКИ JS (${errs().length}):`);
-  for (const e of errs()) o.push(`- ${new Date(e.ts).toLocaleTimeString("ru")} ${e.m}`);
-  o.push("", "СЪЁМКИ:");
-  for (const s of app.sessions) {
-    const c = L.counts(app.data, s);
-    o.push(`- ${s.name || "без названия"} · ${s.modeId}${s.circleNow ? " круг " + s.circleNow : ""} · ${s.status} · снято ${c.done}, потом ${c.skipped}, заперто ${c.locked}, не нужно ${c.na + c.auto} · разрешения ${Object.entries(s.perms).filter(([, v]) => v).map(([k]) => k).join("+") || "нет"} · дверь ${s.states.doorOpen ? "откр" : "закр"}, капот ${s.states.hoodOpen ? "откр" : "закр"} · курсор ${s.cursor}`);
-    o.push(`  действия: ${s.events.map((e) => e.type).join(", ")}`);
-  }
-  return o.join("\n");
-}
-function download(name, text) { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" })); a.download = name; document.body.appendChild(a); a.click(); a.remove(); }
-async function photo(f) {
-  if (!f) return; const img = await createImageBitmap(f); const c = document.createElement("canvas"); c.width = 192; c.height = 120;
-  const x = c.getContext("2d"); const r = Math.max(192 / img.width, 120 / img.height);
-  x.drawImage(img, (192 - img.width * r) / 2, (120 - img.height * r) / 2, img.width * r, img.height * r); app.newDraft.photo = c.toDataURL("image/webp", 0.7); render();
-}
-// свайп только листает (статус не меняет)
-function swipe(el) {
-  let x0 = 0, y0 = 0;
-  el.ontouchstart = (e) => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; };
-  el.ontouchend = (e) => { const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0; if (Math.abs(dx) > 90 && Math.abs(dy) < 60) { const n = L.neighbor(app.data, app.cur, app.cur.cursor, dx < 0 ? 1 : -1); if (n) jump(n); } };
-}
-// экран не гаснет только на кадре
-let wl = null;
-async function wake() { if (!app.settings.wake || wl || !navigator.wakeLock) return; try { wl = await navigator.wakeLock.request("screen"); wl.onrelease = () => { wl = null; }; } catch { /* */ } }
-function unwake() { if (wl) { wl.release().catch(() => {}); wl = null; } }
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible") return;
-  if (app.screen === "frame") wake();
-  if (navigator.serviceWorker) navigator.serviceWorker.getRegistration().then((r) => r && r.update()).catch(() => {});
-});
-
-async function checkOffline() {
+let offTries = 0;
+async function checkOffline() {   // сколько файлов уже в офлайн-кэше (опрос до готовности, не дольше ~3 мин)
   try {
     const m = await (await fetch("precache.json", { cache: "no-store" })).json(); const c = await caches.open("threelaps-" + m.version);
     const n = (await c.keys()).length; app.pre = { n, total: m.files.length, ready: n >= m.files.length };
-    if (app.pre.ready) localStorage.setItem("tl_offline", m.version); else setTimeout(checkOffline, 2500);
-    if (app.screen === "home") render();
+    if (!app.pre.ready && ++offTries < 70) setTimeout(checkOffline, 2500);
+    showOffline();
   } catch { /* нет сети или SW ещё не готов */ }
 }
+
 // ---------- старт ----------
 async function init() {
   app.data = await (await fetch("shots.json")).json();
-  app.settings = { ...app.settings, ...(await S.getKV("settings", {})) };
-  app.sessions = (await S.allSessions()).filter((s) => s && s.shots && app.data.shots.every((x) => s.shots[x.id]));
-  app.bugs = await S.getKV("bugs", []); S.persist();
-  try { app.version = (await (await fetch("precache.json")).json()).version; } catch { /* */ }
+  if (!L.ROUTE_IDS.includes(app.rid)) app.rid = "out";
+  if (!TABS.some(([k]) => k === app.tab)) app.tab = "map";
+  for (const rid of L.ROUTE_IDS) app.learn[rid] = L.clampIndex(app.data, rid, app.learn[rid]);
+  try { app.build = (await (await fetch("precache.json")).json()).version; } catch { /* */ }
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (app.settings.theme === "auto") render(); });
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.addEventListener("controllerchange", () => { if (app.updating) location.reload(); });
-    navigator.serviceWorker.addEventListener("message", (e) => { if (e.data && e.data.type === "precache") { app.pre = { n: e.data.n, total: e.data.total, ready: e.data.n >= e.data.total }; if (app.pre.ready) try { localStorage.setItem("tl_offline", e.data.version); } catch { /* */ } if (app.screen === "home") render(); } });
-    navigator.serviceWorker.register("sw.js").then((r) => { r.addEventListener("updatefound", () => { const w = r.installing; w && w.addEventListener("statechange", () => { if (w.state === "installed" && navigator.serviceWorker.controller) { app.update = true; if (app.screen === "home") render(); } }); }); }).catch(() => {});
-    if (localStorage.getItem("tl_offline")) app.pre.ready = true;
+    navigator.serviceWorker.addEventListener("message", (e) => { if (e.data && e.data.type === "precache") { app.pre = { n: e.data.n, total: e.data.total, ready: e.data.n >= e.data.total }; showOffline(); } });
+    navigator.serviceWorker.register("sw.js").then((r) => {
+      r.addEventListener("updatefound", () => { const w = r.installing; w && w.addEventListener("statechange", () => { if (w.state === "installed" && navigator.serviceWorker.controller) { app.update = true; render(); } }); });
+    }).catch(() => {});
     checkOffline();
   }
-  history.replaceState({}, ""); history.pushState({}, "");
-  if (!app.settings.onboarded) app.screen = "onboard";
-  const rid = localStorage.getItem("tl_resume");
-  const rs = rid && app.sessions.find((x) => x.id === rid && x.status !== "closed");
-  if (rs && app.settings.onboarded) { app.cur = rs; app.stack = ["home"]; if (!rs.preSeen) app.screen = "pre"; else toNext(); return; }
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && navigator.serviceWorker) navigator.serviceWorker.getRegistration().then((r) => r && r.update()).catch(() => {});
+  });
+  history.replaceState({}, "");
   render();
 }
 init();
-window.__tl = { app, L, render, handle };
