@@ -293,7 +293,7 @@ const view = {
       ${sec.lines.map((l0) => { const l = talkLine(l0, nm), v = (s && s.qs[l.id]) || {}, k = TALK_FLAT.findIndex((x) => x.id === l.id);
         const num = l.q ? `Вопрос ${qs.findIndex((x) => x.id === l.id) + 1} из ${qs.length}` : l.grant ? `Разрешение ${grants.findIndex((x) => x.id === l.id) + 1} из ${grants.length}` : `Фраза ${k + 1} из ${TALK_FLAT.length}`;
         const g = l.grant && s ? grantUI(s, l) : "";
-        return `<div class="ph ${l.q ? "q" : ""} ${l.grant ? "grant" : ""} ${asked(l0) ? "asked" : ""}" id="ln-${l.id}"><div class="num">${num}${asked(l0) ? " · ✓" : ""}</div><div class="en">${esc(l.en)}</div><div class="ru">${esc(l.ru)}</div>${g}
+        return `<div class="ph ${l.q ? "q" : ""} ${l.grant ? "grant" : ""} ${asked(l0) ? "asked" : ""}" id="ln-${l.id}"><div class="num"><b class="tag">${esc(l.tag || "")}</b> ${num}${asked(l0) ? " · ✓" : ""}</div><div class="en">${esc(l.en)}</div><div class="ru">${esc(l.ru)}</div>${g}
           <div class="row" style="margin-top:8px"><button class="btn" style="min-height:48px;margin:0" data-a="owner" data-id="${k}">Показать хозяину</button>
           ${l.q && s ? `<label class="chk"><input type="checkbox" data-q="${l.id}" data-f="asked" ${v.asked ? "checked" : ""}> спросил</label>` : ""}</div>
           ${FIELDS[l.id] && s ? `${v.answer ? `<div class="ans">${esc(v.answer)}</div>` : ""}<button class="btn ${v.answer ? "" : "go"}" style="margin:8px 0 0" data-a="ansform" data-id="${l.id}">${v.answer ? "Изменить ответ" : l.id === "v3" ? "Записать контакт" : "Записать ответ"}</button>`
@@ -333,7 +333,7 @@ function sheets() {
       : f.type === "area" ? `<label class="fl"><span>${lab(f)}</span><textarea data-fk="${f.k}" rows="2" placeholder="${esc(f.ph || "")}">${esc(v[f.k] || "")}</textarea></label>`
       : `<label class="fl"><span>${lab(f)}</span><input data-fk="${f.k}" type="${f.type === "tel" ? "tel" : f.type === "email" ? "email" : "text"}" ${["num", "money"].includes(f.type) ? 'inputmode="numeric"' : ""} value="${esc(v[f.k] || "")}" placeholder="${esc(f.ph || "")}" autocomplete="off"></label>`;
     const qn = TALK_FLAT.filter((x) => x.q), qi = qn.findIndex((x) => x.id === id) + 1;
-    return sheet(`<div class="num">Вопрос ${qi} из ${qn.length} · ${id === "v3" ? "Contact · Контакт" : "ответ"}</div><h2 style="font-size:19px">${esc(l.ru)}</h2>
+    return sheet(`<div class="num"><b class="tag">${esc(l.tag)}</b> Вопрос ${qi} из ${qn.length}${id === "v3" ? " · Contact" : ""}</div><h2 style="font-size:19px">${esc(l.ru)}</h2>
       ${id === "v3" ? `<div class="small mut">Можно дать телефон хозяину — подписи по-английски. Хранится только в этом телефоне.</div>` : ""}
       ${fs.map(field).join("")}<label class="fl"><span>Ещё заметка</span><textarea data-fk="_note" rows="2">${esc(v._note || "")}</textarea></label>
       <button class="btn go" data-a="anssave" data-id="${id}">Сохранить</button><button class="btn ghost" data-a="closesheet">Отмена</button>`); }
@@ -362,7 +362,7 @@ function render() {
   root.dataset.scr = app.screen;
   root.innerHTML = v() + sheets()
     + (app.toast ? `<div class="toast ${["frame", "map", "pre"].includes(app.screen) ? "" : "top"}"><span>${esc(app.toast.msg)}</span>${app.toast.label ? `<button data-a="toast">${esc(app.toast.label)}</button>` : ""}</div>` : "")
-    + (app.owner !== null ? (() => { const l = talkLine(TALK_FLAT[app.owner], app.settings.myName); return `<div class="owner"><div class="onum">${TALK_FLAT[app.owner].q ? `Вопрос ${TALK_FLAT.filter((x) => x.q).indexOf(TALK_FLAT[app.owner]) + 1} из ${TALK_FLAT.filter((x) => x.q).length}` : `Фраза ${app.owner + 1} из ${TALK_FLAT.length}`}</div><div class="en">${esc(l.en)}</div><div class="ru">${esc(l.ru)}</div>
+    + (app.owner !== null ? (() => { const l = talkLine(TALK_FLAT[app.owner], app.settings.myName); return `<div class="owner"><div class="onum">${esc(TALK_FLAT[app.owner].tag)} · ${TALK_FLAT[app.owner].q ? `Вопрос ${TALK_FLAT.filter((x) => x.q).indexOf(TALK_FLAT[app.owner]) + 1} из ${TALK_FLAT.filter((x) => x.q).length}` : `Фраза ${app.owner + 1} из ${TALK_FLAT.length}`}</div><div class="en">${esc(l.en)}</div><div class="ru">${esc(l.ru)}</div>
       <div class="ownerbar"><button data-a="ownerp" ${app.owner ? "" : "disabled"}>‹</button><button data-a="ownerx">Закрыть</button><button data-a="ownern" ${app.owner < TALK_FLAT.length - 1 ? "" : "disabled"}>›</button></div></div>`; })() : "");
   if (same) { const n = $(".scr"); if (n) n.scrollTop = keep; }
   if (app.screen === "frame") { wake(); const cw = $("#cw"); if (cw) swipe(cw); } else unwake();
@@ -494,7 +494,7 @@ async function handle(a, id, t) {
 }
 function fullSummary(s) {   // итог + ответы хозяина (вопрос по-русски)
   const qa = TALK_FLAT.filter((l) => l.q && s.qs[l.id] && (s.qs[l.id].asked || s.qs[l.id].answer));
-  return L.summaryText(app.data, { ...s, qs: {} }) + (qa.length ? "\n\nРазговор с хозяином:\n" + qa.map((l) => `• ${l.ru}\n  ${s.qs[l.id].answer || "(спросил, ответ не записан)"}`).join("\n") : "");
+  return L.summaryText(app.data, { ...s, qs: {} }) + (qa.length ? "\n\nРазговор с хозяином:\n" + qa.map((l) => `• ${l.tag}: ${(s.qs[l.id].answer || "(спросил, ответ не записан)").replace(/\n/g, "; ")}`).join("\n") : "");
 }
 function syncAns() {   // перенести введённое в черновик перед перерисовкой листа
   if (!app.sheet || app.sheet.t !== "ans") return;
