@@ -99,3 +99,4 @@ input[type=tel],input[type=email]{width:100%;font:inherit;font-size:17px;padding
 .ans{white-space:pre-line;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:8px;font-size:15px}
 .opts{display:flex;flex-wrap:wrap;gap:8px}.opts button{min-height:48px;padding:0 16px;border-radius:24px;background:var(--btn2);font-weight:700;font-size:16px}.opts button.on{background:var(--blue);color:#fff}
 .sheet .num{font-size:13px;font-weight:800;color:var(--mut);text-transform:uppercase}
+.verline{display:flex;align-items:center;gap:8px;margin:6px 0 12px}.upd{margin-left:auto;min-height:40px;padding:0 14px;border-radius:12px;background:var(--btn2);font-weight:800;font-size:14px;flex:none}

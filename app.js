@@ -161,7 +161,7 @@ const view = {
     const live = list.find((s) => s.status !== "closed");
     const off = app.pre.ready ? "Офлайн готов ✓" : app.pre.total ? `Загрузка для офлайна ${app.pre.n}/${app.pre.total}` : "Работает без интернета";
     const prog = (s) => { const c = L.counts(app.data, s); return `${s.circleNow ? `круг ${s.circleNow} · ` : ""}снято ${c.done}${c.skipped ? ` · потом ${c.skipped}` : ""}`; };
-    return `<div class="scr"><h1>Three Laps</h1><div class="mut">Три круга вокруг машины</div><div class="small mut" style="margin:6px 0 12px">${off}</div>
+    return `<div class="scr"><h1>Three Laps</h1><div class="mut">Три круга вокруг машины</div><div class="verline"><span class="small mut">${off} · версия ${esc(app.version)}</span><button class="upd" data-a="refresh">${app.checking ? "Проверяю…" : "Обновить"}</button></div>
       ${app.update ? `<button class="btn yel" data-a="update">Есть обновление: применить</button>` : ""}
       ${live ? `<div class="card hero" data-a="open" data-id="${live.id}"><div class="row"><div class="ico">${live.photo ? `<img src="${live.photo}" class="phot">` : carIcon(live.icon, 84)}</div>
         <div class="grow"><div class="title">${esc(live.name || "Машина без названия")}</div><div class="sub">${prog(live)}</div></div></div>
@@ -390,7 +390,7 @@ async function handle(a, id, t) {
     case "settings": go("settings"); break;
     case "back": back(); break;
     case "update": app.updating = true; navigator.serviceWorker.getRegistration().then((r) => { if (r && r.waiting) r.waiting.postMessage("skipWaiting"); }); break;
-    case "refresh": { app.updating = true; const r = await navigator.serviceWorker.getRegistration(); if (r) { await r.update(); if (r.waiting) r.waiting.postMessage("skipWaiting"); else showToast("Установлена последняя версия", "", null, 2500); } break; }
+    case "refresh": await forceUpdate(); break;
     case "theme": app.settings.theme = id; await S.setKV("settings", app.settings); render(); break;
     case "tog": toggle(t.dataset.g, id); break;
     case "replayob": app.ob = 0; app.screen = "onboard"; render(); break;
@@ -500,6 +500,20 @@ function syncAns() {   // перенести введённое в чернов�
   if (!app.sheet || app.sheet.t !== "ans") return;
   root.querySelectorAll("[data-fk]").forEach((el) => { app.sheet.draft[el.dataset.fk] = el.value.trim(); });
 }
+async function forceUpdate() {
+  if (!("serviceWorker" in navigator)) { location.reload(); return; }
+  app.checking = true; render();
+  try {
+    const r = await navigator.serviceWorker.getRegistration();
+    if (!r) { location.reload(); return; }
+    await r.update();
+    const t0 = Date.now();
+    while (r.installing && Date.now() - t0 < 60000) await new Promise((z) => setTimeout(z, 500));   // докачать новую версию (≈10 МБ)
+    if (r.waiting) { app.updating = true; r.waiting.postMessage("skipWaiting"); setTimeout(() => location.reload(), 4000); return; }
+    showToast(`Уже последняя версия (${app.version})`, "", null, 2500);
+  } catch (e) { logErr("update: " + e.message); showToast("Нет связи — обновлю, когда появится интернет", "", null, 3000); }
+  app.checking = false; render();
+}
 function toggle(g, k) {
   if (g === "dperm") { app.newDraft.perms[k] = !app.newDraft.perms[k]; render(); }
   else if (g === "pdraft") { app.draft.perms[k] = !app.draft.perms[k]; render(); }
@@ -539,7 +553,11 @@ function swipe(el) {
 let wl = null;
 async function wake() { if (!app.settings.wake || wl || !navigator.wakeLock) return; try { wl = await navigator.wakeLock.request("screen"); wl.onrelease = () => { wl = null; }; } catch { /* */ } }
 function unwake() { if (wl) { wl.release().catch(() => {}); wl = null; } }
-document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && app.screen === "frame") wake(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  if (app.screen === "frame") wake();
+  if (navigator.serviceWorker) navigator.serviceWorker.getRegistration().then((r) => r && r.update()).catch(() => {});
+});
 
 async function checkOffline() {
   try {
